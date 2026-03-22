@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Upload, X, Camera } from 'lucide-react';
+import { Send, Upload, X, Camera, Mic, MicOff } from 'lucide-react';
 import { ChatMessage, JobSheet } from '@/types/job';
 import { createJobSheet } from '@/lib/jobService';
 
@@ -25,8 +25,61 @@ export default function CustomerChatbot() {
   const [isLoading, setIsLoading] = useState(false);
   const [showJobSheet, setShowJobSheet] = useState(false);
   const [jobSheetData, setJobSheetData] = useState<any>(null);
+  const [isListening, setIsListening] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
+
+  // ── Voice input via Web Speech API ──────────
+  const startListening = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Voice input is not supported in this browser. Try Chrome or Safari.');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-AU';
+
+    recognition.onresult = (event: any) => {
+      let transcript = '';
+      for (let i = 0; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      setCurrentMessage(transcript);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsListening(true);
+  };
+
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    setIsListening(false);
+  };
+
+  const toggleVoice = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  };
 
   // Auto scroll to bottom when new messages arrive
   useEffect(() => {
@@ -781,6 +834,18 @@ export default function CustomerChatbot() {
             title="Add photos"
           >
             <Camera className="w-5 h-5" />
+          </button>
+
+          <button
+            onClick={toggleVoice}
+            className={`p-3 rounded-xl transition-all duration-200 ${
+              isListening
+                ? 'text-red-600 bg-red-50 animate-pulse'
+                : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'
+            }`}
+            title={isListening ? 'Stop recording' : 'Voice input'}
+          >
+            {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
           </button>
 
           <input
