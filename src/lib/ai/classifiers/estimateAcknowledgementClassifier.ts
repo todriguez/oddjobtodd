@@ -109,7 +109,7 @@ export function classifyFromText(messageText: string): EstimateAckResult {
     }
   }
 
-  // Pushback
+  // Pushback (too expensive OR too cheap / skepticism)
   const pushbackPatterns = [
     /that('s| is) (a lot|expensive|steep|much|pricey)/,
     /more than i (thought|expected)/,
@@ -117,6 +117,14 @@ export function classifyFromText(messageText: string): EstimateAckResult {
     /bit (much|steep|high)/,
     /can you do (it )?(cheaper|for less)/,
     /any (way|chance).*(cheaper|discount|less)/,
+    // "Too cheap" skepticism — customer doubts the estimate is realistic
+    /that('s| is|seems?) (cheap|low|not enough|unrealistic)/,
+    /exceedingly cheap/,
+    /seems? (too )?(cheap|low)/,
+    /how (do|can) you .* in that (time|price)/,
+    /how (do|can) you get .* (coats?|done) in/,
+    /not enough time/,
+    /that('s| is) not (realistic|possible|enough)/,
   ];
   for (const p of pushbackPatterns) {
     if (p.test(text)) {

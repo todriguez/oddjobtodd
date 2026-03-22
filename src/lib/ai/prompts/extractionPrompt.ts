@@ -91,9 +91,12 @@ EXTRACTION RULES:
    "yeah that's fine" / "sounds good" / "about what I expected" → "accepted"
    "ok" / "I guess" / "maybe" → "tentative"
    "hmm" / "that much?" / "I was thinking less" → "pushback"
+   "that seems cheap" / "how can you do it for that?" / "seems low" / "that's not enough time" → "pushback"
+   Questions about method/feasibility ("how do you mortise in that time?", "two coats?") → "pushback"
    "no way" / "too expensive" / "forget it" → "rejected"
    "what's your hourly rate?" / "can you do it cheaper?" → "wants_exact_price"
    "I'm getting a few quotes" / "what do others charge?" → "rate_shopping"
+   IMPORTANT: "cheap" is pushback (skepticism), not acceptance!
 
 4. CUSTOMER TONE — read between the lines:
    Helpful, detail naturally → "friendly" or "practical"

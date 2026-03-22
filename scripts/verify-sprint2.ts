@@ -164,7 +164,7 @@ function main() {
   assert("Empty state defaults", emptyState.conversationPhase === "greeting");
   assert("Empty completeness", emptyState.completenessScore === 0);
 
-  const merged1 = mergeExtraction(emptyState, extraction1);
+  const merged1 = mergeExtraction(emptyState, extraction1).state;
   assert("Merge: jobType set", merged1.jobType === "doors_windows");
   assert("Merge: suburb set", merged1.suburb === "Noosa Heads");
   assert("Merge: completeness > 0", merged1.completenessScore > 0);
@@ -178,7 +178,7 @@ function main() {
     missingInfo: [],
   });
 
-  const merged2 = mergeExtraction(merged1, extraction2);
+  const merged2 = mergeExtraction(merged1, extraction2).state;
   assert("Merge 2: name set", merged2.customerName === "Sarah Mitchell");
   assert("Merge 2: phone set", merged2.customerPhone === "0423456789");
   assert("Merge 2: suburb preserved", merged2.suburb === "Noosa Heads");
@@ -190,7 +190,7 @@ function main() {
     conversationPhase: "providing_details",
     missingInfo: [],
   });
-  const merged3 = mergeExtraction(merged1, extraction3);
+  const merged3 = mergeExtraction(merged1, extraction3).state;
   assert("Merge 3: scope appended", !!(merged3.scopeDescription?.includes("3 internal") && merged3.scopeDescription?.includes("Standard sizes")));
 
   // ── 5. Conversation State Evaluation ──────

@@ -259,7 +259,7 @@ function main() {
     missingInfo: ["contact_details"],
   });
 
-  const merged = mergeExtraction(emptyState, extraction1);
+  const merged = mergeExtraction(emptyState, extraction1).state;
   assert("Scope clarity > 60 after extraction", merged.scopeClarity > 60, `got ${merged.scopeClarity}`);
   assert("Location clarity > 50", merged.locationClarity > 50, `got ${merged.locationClarity}`);
   assert("Estimate readiness > 60", merged.estimateReadiness > 60, `got ${merged.estimateReadiness}`);
@@ -274,7 +274,7 @@ function main() {
     conversationPhase: "providing_contact",
     missingInfo: [],
   });
-  const merged2 = mergeExtraction(merged, extraction2);
+  const merged2 = mergeExtraction(merged, extraction2).state;
   assert("Contact readiness jumps after name+phone", merged2.contactReadinessScore >= 70, `got ${merged2.contactReadinessScore}`);
   assert("Overall completeness higher", merged2.completenessScore > merged.completenessScore);
 

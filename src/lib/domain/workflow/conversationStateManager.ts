@@ -64,13 +64,23 @@ export function evaluateConversationState(state: AccumulatedJobState): Conversat
     };
   }
 
+  // ── Estimate pushback — address concern before moving on ──
+  if (
+    state.estimatePresented &&
+    (state.estimateAckStatus === "pushback" ||
+     state.estimateAckStatus === "wants_exact_price" ||
+     state.estimateAckStatus === "uncertain")
+  ) {
+    // Don't ask for contact or close — let the bot address the concern
+    return { type: "continue" };
+  }
+
   // ── Need contact details ──
   if (
     state.estimatePresented &&
     state.estimateAcknowledged &&
     !state.customerPhone &&
-    !state.customerEmail &&
-    state.estimateAckStatus !== "pushback"
+    !state.customerEmail
   ) {
     return { type: "ask_contact" };
   }

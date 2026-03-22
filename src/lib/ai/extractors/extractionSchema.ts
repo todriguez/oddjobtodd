@@ -234,11 +234,27 @@ export function mergeExtraction(
   if (extraction.jobSubcategory) setField("jobSubcategory", extraction.jobSubcategory);
   if (extraction.repairReplaceSignal) setField("repairReplaceSignal", extraction.repairReplaceSignal);
   if (extraction.scopeDescription) {
-    // Append scope description rather than replace
-    const appended = merged.scopeDescription
-      ? `${merged.scopeDescription}. ${extraction.scopeDescription}`
-      : extraction.scopeDescription;
-    setField("scopeDescription", appended);
+    // The LLM re-extracts scope each turn. If the new extraction substantially
+    // overlaps the existing scope (>60% word overlap), it's a re-statement — take
+    // the longer one. If it's genuinely new info (<60% overlap), merge them.
+    const existing = merged.scopeDescription || "";
+    const incoming = extraction.scopeDescription;
+
+    if (!existing) {
+      setField("scopeDescription", incoming);
+    } else {
+      const existingWords = new Set(existing.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+      const incomingWords = incoming.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+      const overlap = incomingWords.filter(w => existingWords.has(w)).length / Math.max(incomingWords.length, 1);
+
+      if (overlap >= 0.6) {
+        // High overlap — it's a re-statement. Keep the longer/more detailed one.
+        setField("scopeDescription", incoming.length >= existing.length ? incoming : existing);
+      } else {
+        // Low overlap — genuinely new details. Merge them.
+        setField("scopeDescription", `${existing}. ${incoming}`);
+      }
+    }
   }
   if (extraction.quantity) setField("quantity", extraction.quantity);
   if (extraction.materials) setField("materials", extraction.materials);
