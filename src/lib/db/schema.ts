@@ -96,6 +96,21 @@ export const jobCategoryEnum = pgEnum("job_category", [
   "other",
 ]);
 
+// ── Universal Taxonomy ──────────────────────
+export const categoryDimensionEnum = pgEnum("category_dimension", [
+  "what",
+  "how",
+  "instrument",
+]);
+
+export interface CategoryAttribute {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+  extractionHint?: string;
+}
+
 export const leadSourceEnum = pgEnum("lead_source", [
   "website_chat",
   "facebook",
@@ -352,8 +367,13 @@ export const jobs = pgTable(
 
     // Lead metadata
     leadSource: leadSourceEnum("lead_source").default("website_chat"),
-    jobType: jobCategoryEnum("job_type").default("general"),
-    subcategory: varchar("subcategory", { length: 100 }),
+    jobType: jobCategoryEnum("job_type").default("general"), // DEPRECATED: use categoryPath
+    subcategory: varchar("subcategory", { length: 100 }),    // DEPRECATED: use categoryPath
+
+    // Universal taxonomy columns
+    categoryPath: varchar("category_path", { length: 255 }),  // e.g. "services.trades.plumbing"
+    txType: varchar("tx_type", { length: 50 }),                // e.g. "hire"
+    instrumentType: varchar("instrument_type", { length: 100 }), // e.g. "inst.contract.service-agreement"
 
     // Description
     descriptionRaw: text("description_raw"),
@@ -413,6 +433,7 @@ export const jobs = pgTable(
     index("jobs_suburb_group_idx").on(table.suburbGroup),
     index("jobs_needs_review_idx").on(table.needsReview),
     index("jobs_confidence_idx").on(table.confidenceScore),
+    index("jobs_category_path_idx").on(table.categoryPath),
   ]
 );
 
@@ -811,5 +832,38 @@ export const auditLog = pgTable(
     index("audit_log_actor_idx").on(table.actorType, table.actorId),
     index("audit_log_action_idx").on(table.action),
     index("audit_log_created_at_idx").on(table.createdAt),
+  ]
+);
+
+// ── Categories (Universal Taxonomy) ─────────
+
+export const categories = pgTable(
+  "categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    path: varchar("path", { length: 255 }).notNull().unique(), // LTREE-style: "services.trades.plumbing"
+    dimension: categoryDimensionEnum("dimension").notNull(),
+    name: varchar("name", { length: 100 }).notNull(),
+    slug: varchar("slug", { length: 100 }).notNull(),
+    level: integer("level").notNull().default(0),
+    parentPath: varchar("parent_path", { length: 255 }),
+    description: text("description"),
+    keywords: jsonb("keywords").$type<string[]>().default([]),
+    attributes: jsonb("attributes").$type<CategoryAttribute[]>().default([]),
+    valueMultiplier: numeric("value_multiplier", { precision: 3, scale: 2 }).default("1.00"),
+    siteVisitLikely: boolean("site_visit_likely").default(false),
+    licensedTrade: boolean("licensed_trade").default(false),
+    validTxTypes: jsonb("valid_tx_types").$type<string[]>().default([]),
+    modalTemplate: varchar("modal_template", { length: 50 }),
+    embeddingText: text("embedding_text"),
+    isActive: boolean("is_active").default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("categories_dimension_idx").on(table.dimension),
+    index("categories_level_idx").on(table.level),
+    index("categories_parent_path_idx").on(table.parentPath),
+    index("categories_slug_idx").on(table.slug),
   ]
 );

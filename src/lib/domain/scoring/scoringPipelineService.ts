@@ -22,6 +22,7 @@ import { scoreQuoteWorthiness, type QuoteWorthinessResult } from "./quoteWorthin
 import { generateRecommendation, type RecommendationResult } from "./recommendationService";
 import { scoreConfidence, type ConfidenceResult } from "./confidenceService";
 import { classifySuburb, type SuburbGroup } from "./suburbGroupService";
+import { resolveCategory, type CategoryResolution } from "../categories/categoryResolver";
 
 export interface ScoringPipelineResult {
   fit: CustomerFitResult;
@@ -29,6 +30,7 @@ export interface ScoringPipelineResult {
   recommendation: RecommendationResult;
   confidence: ConfidenceResult;
   suburbGroup: SuburbGroup;
+  category: CategoryResolution | null;
   snapshot: SystemScoresSnapshot;
 }
 
@@ -39,11 +41,14 @@ export function runScoringPipeline(
   state: AccumulatedJobState,
   _context?: ScoringContext // reserved for Phase 2 context-aware scoring
 ): ScoringPipelineResult {
+  // 0. Category resolution (WHAT/HOW/INSTRUMENT triple)
+  const category = resolveCategory(state);
+
   // 1. Customer fit
   const fit = scoreCustomerFit(state);
 
-  // 2. Quote worthiness (needs fit score as input)
-  const worthiness = scoreQuoteWorthiness(state, fit.score);
+  // 2. Quote worthiness (needs fit score + category as input)
+  const worthiness = scoreQuoteWorthiness(state, fit.score, category);
 
   // 3. Recommendation (needs all three)
   const recommendation = generateRecommendation(state, fit, worthiness);
@@ -55,9 +60,9 @@ export function runScoringPipeline(
   const suburbGroup = classifySuburb(state.suburb, state.locationClue);
 
   // 6. Build snapshot for storage
-  const snapshot = buildSnapshot(state, fit, worthiness, recommendation, confidence);
+  const snapshot = buildSnapshot(state, fit, worthiness, recommendation, confidence, category);
 
-  return { fit, worthiness, recommendation, confidence, suburbGroup, snapshot };
+  return { fit, worthiness, recommendation, confidence, suburbGroup, category, snapshot };
 }
 
 /**
@@ -68,7 +73,8 @@ function buildSnapshot(
   fit: CustomerFitResult,
   worthiness: QuoteWorthinessResult,
   recommendation: RecommendationResult,
-  confidence: ConfidenceResult
+  confidence: ConfidenceResult,
+  category: CategoryResolution | null
 ): SystemScoresSnapshot {
   // Calculate completeness sub-scores
   const scopeClarity = state.scopeClarity ?? 0;
@@ -134,5 +140,13 @@ function buildSnapshot(
       presented: state.estimatePresented ?? false,
       acknowledged: state.estimateAckStatus === "accepted" || state.estimateAckStatus === "tentative",
     },
+    category: category ? {
+      path: category.path,
+      name: category.name,
+      confidence: category.confidence,
+      valueMultiplier: category.scoringContext.valueMultiplier,
+      siteVisitLikely: category.scoringContext.siteVisitLikely,
+      licensedTrade: category.scoringContext.licensedTrade,
+    } : null,
   };
 }

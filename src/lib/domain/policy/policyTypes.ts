@@ -187,6 +187,14 @@ export interface SystemScoresSnapshot {
     presented: boolean;
     acknowledged: boolean;
   };
+  category: {
+    path: string;
+    name: string;
+    confidence: string;
+    valueMultiplier: number;
+    siteVisitLikely: boolean;
+    licensedTrade: boolean;
+  } | null;
 }
 
 // ── Convenience: empty context ──────────────

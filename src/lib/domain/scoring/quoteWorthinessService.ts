@@ -9,6 +9,7 @@
 
 import type { AccumulatedJobState } from "../../ai/extractors/extractionSchema";
 import type { EffortBand } from "../estimates/effortBandService";
+import type { CategoryResolution } from "../categories/categoryResolver";
 
 export interface QuoteWorthinessResult {
   score: number;               // 0-100
@@ -118,7 +119,8 @@ function inferBandFromScope(state: AccumulatedJobState): string {
  */
 export function scoreQuoteWorthiness(
   state: AccumulatedJobState,
-  customerFitScore: number
+  customerFitScore: number,
+  category?: CategoryResolution | null
 ): QuoteWorthinessResult {
   const reasoning: string[] = [];
   let score = 0;
@@ -187,6 +189,27 @@ export function scoreQuoteWorthiness(
   if ((band === "quick" || band === "short") && !isLocal) {
     score -= 10;
     reasoning.push("-10: Small job outside core area");
+  }
+
+  // 7. Category value multiplier (0-10 points)
+  if (category?.scoringContext) {
+    const mult = category.scoringContext.valueMultiplier;
+    if (mult >= 1.4) {
+      score += 10;
+      reasoning.push(`+10: High-value category (×${mult})`);
+    } else if (mult >= 1.2) {
+      score += 6;
+      reasoning.push(`+6: Above-average value category (×${mult})`);
+    } else if (mult < 0.9) {
+      score -= 5;
+      reasoning.push(`-5: Low-value category (×${mult})`);
+    }
+  }
+
+  // 8. Category site-visit hint
+  if (category?.scoringContext?.siteVisitLikely && (state.scopeClarity ?? 0) < 40) {
+    score += 5;
+    reasoning.push("+5: Category typically needs site visit (scope still unclear)");
   }
 
   // ── Adversarial stacking cap ──

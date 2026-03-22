@@ -6,6 +6,7 @@
  */
 
 import type { AccumulatedJobState } from "../extractors/extractionSchema";
+import { buildCategoryAwareExtractionHints } from "../../domain/categories/categoryResolver";
 
 export function buildExtractionPrompt(
   currentState: AccumulatedJobState,
@@ -125,5 +126,6 @@ EXTRACTION RULES:
 
 8. SUBURB — extract any Sunshine Coast suburb mentioned. Common ones: Noosa Heads, Noosaville, Sunshine Beach, Tewantin, Cooroy, Peregian Beach, Maroochydore, Mooloolaba, Buderim, Caloundra, Nambour, Coolum Beach, Eumundi, Doonan. Also extract from context like "I'm in Noosa" → "Noosa Heads".
 
+${buildCategoryAwareExtractionHints(currentState)}
 Output ONLY the raw JSON object. No \`\`\`json fences. No markdown. No explanation.`;
 }
