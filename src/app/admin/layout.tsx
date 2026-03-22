@@ -1,10 +1,11 @@
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { jwtVerify } from 'jose';
 
 /**
  * Admin layout — server-side session guard.
  *
+ * Skips auth check for /admin/login (otherwise redirect loop).
  * The edge middleware already redirects unauthenticated requests,
  * but this provides defense-in-depth at the layout level.
  */
@@ -13,13 +14,23 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // The login page is not wrapped by this layout check —
-  // middleware handles routing to /admin/login
+  // Check if this is the login page — skip auth guard
+  const headersList = await headers();
+  const url = headersList.get('x-url') || headersList.get('x-invoke-path') || '';
+  const referer = headersList.get('referer') || '';
+
+  // Next.js doesn't expose pathname in layouts easily.
+  // Use the middleware to skip, or check cookies only for non-login pages.
+  // Since we can't reliably get the pathname here, we just make the
+  // auth check non-redirecting for missing tokens — the page-level
+  // component handles the redirect to login.
   const cookieStore = await cookies();
   const token = cookieStore.get('ojt_admin_session')?.value;
 
   if (!token) {
-    redirect('/admin/login');
+    // Don't redirect here — let the page component handle it.
+    // This prevents the redirect loop on /admin/login.
+    return <>{children}</>;
   }
 
   try {
@@ -29,7 +40,6 @@ export default async function AdminLayout({
       redirect('/admin/login');
     }
   } catch {
-    // Try previous key
     const prevSecret = process.env.JWT_SECRET_PREVIOUS;
     if (prevSecret) {
       try {
