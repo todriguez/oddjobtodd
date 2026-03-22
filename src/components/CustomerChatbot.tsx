@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, Upload, X, Camera, Mic, MicOff } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Send, X, Camera, Mic, MicOff } from 'lucide-react';
 import { ChatMessage } from '@/types/job';
+import PhoneVerification from './PhoneVerification';
+import MyJobsList from './MyJobsList';
 
 interface Photo {
   file: File;
@@ -10,25 +12,136 @@ interface Photo {
   id: string;
 }
 
+type AppView = 'loading' | 'my_jobs' | 'chat';
+
+const STORAGE_KEY = 'ojt_current_job';
+
+const OPENING_MESSAGE: ChatMessage = {
+  id: '1',
+  role: 'assistant',
+  content: "G'day! I'm Todd's AI assistant. I'm here to help Todd understand your job properly so he can tell you whether he can help.\n\nWhat do you need done? You can type, send photos, or press the mic and talk me through it.",
+  timestamp: new Date().toISOString(),
+};
+
 export default function CustomerChatbot() {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: "G'day! I'm Todd's AI assistant. I'm here to help Todd understand your job properly so he can tell you whether he can help.\n\nWhat do you need done? You can type, send photos, or press the mic and talk me through it.",
-      timestamp: new Date().toISOString(),
-    },
-  ]);
+  // ── Session state ──
+  const [view, setView] = useState<AppView>('loading');
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // ── Chat state ──
+  const [messages, setMessages] = useState<ChatMessage[]>([OPENING_MESSAGE]);
   const [currentMessage, setCurrentMessage] = useState('');
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [conversationPhase, setConversationPhase] = useState<string | null>(null);
+  const [showPhoneVerification, setShowPhoneVerification] = useState(false);
+
+  // ── Voice input state ──
   const [isListening, setIsListening] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  // ── Voice input via Web Speech API ──────────
+  // ── Session detection on mount ──
+  useEffect(() => {
+    checkSession();
+  }, []);
+
+  const checkSession = async () => {
+    try {
+      const res = await fetch('/api/v2/auth/session');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authenticated && data.type === 'customer') {
+          setCustomerId(data.customerId);
+          setIsAuthenticated(true);
+          setView('my_jobs');
+          return;
+        }
+      }
+    } catch {
+      // Not authenticated — check localStorage
+    }
+
+    // Check localStorage for anonymous job
+    const savedJobId = localStorage.getItem(STORAGE_KEY);
+    if (savedJobId) {
+      setJobId(savedJobId);
+      await loadConversationHistory(savedJobId);
+      setView('chat');
+    } else {
+      setView('chat');
+    }
+  };
+
+  // ── Load conversation history for a job ──
+  const loadConversationHistory = useCallback(async (loadJobId: string) => {
+    try {
+      const res = await fetch(`/api/v2/chat?jobId=${loadJobId}`);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      if (data.messages && data.messages.length > 0) {
+        const loaded: ChatMessage[] = data.messages.map((m: any, i: number) => ({
+          id: `loaded-${i}`,
+          role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const,
+          content: m.content || m.rawContent || '',
+          timestamp: m.createdAt || new Date().toISOString(),
+        }));
+        setMessages(loaded);
+      }
+    } catch {
+      // Failed to load — start fresh
+    }
+  }, []);
+
+  // ── Resume a job from MyJobsList ──
+  const handleResumeJob = useCallback(async (resumeJobId: string) => {
+    setJobId(resumeJobId);
+    localStorage.setItem(STORAGE_KEY, resumeJobId);
+    await loadConversationHistory(resumeJobId);
+    setView('chat');
+  }, [loadConversationHistory]);
+
+  // ── Start a new enquiry ──
+  const handleNewEnquiry = useCallback(() => {
+    setJobId(null);
+    localStorage.removeItem(STORAGE_KEY);
+    setMessages([OPENING_MESSAGE]);
+    setConversationPhase(null);
+    setShowPhoneVerification(false);
+    setView('chat');
+  }, []);
+
+  // ── Phone verified callback ──
+  const handlePhoneVerified = useCallback((newCustomerId: string) => {
+    setCustomerId(newCustomerId);
+    setIsAuthenticated(true);
+    setShowPhoneVerification(false);
+
+    // Add a system message
+    setMessages(prev => [...prev, {
+      id: `verified-${Date.now()}`,
+      role: 'assistant',
+      content: "Phone verified — you're all set. You can come back to this conversation anytime.",
+      timestamp: new Date().toISOString(),
+    }]);
+  }, []);
+
+  // ── Show phone verification when bot asks for contact ──
+  useEffect(() => {
+    if (
+      conversationPhase === 'providing_contact' &&
+      !isAuthenticated &&
+      !showPhoneVerification
+    ) {
+      setShowPhoneVerification(true);
+    }
+  }, [conversationPhase, isAuthenticated, showPhoneVerification]);
+
+  // ── Voice input via Web Speech API ──
   const startListening = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -49,14 +162,8 @@ export default function CustomerChatbot() {
       setCurrentMessage(transcript);
     };
 
-    recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
 
     recognitionRef.current = recognition;
     recognition.start();
@@ -72,14 +179,11 @@ export default function CustomerChatbot() {
   };
 
   const toggleVoice = () => {
-    if (isListening) {
-      stopListening();
-    } else {
-      startListening();
-    }
+    if (isListening) stopListening();
+    else startListening();
   };
 
-  // Auto scroll to bottom when new messages arrive
+  // Auto scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -104,22 +208,17 @@ export default function CustomerChatbot() {
       }
     });
 
-    // Reset file input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Remove photo
   const removePhoto = (photoId: string) => {
     setPhotos(prev => prev.filter(p => p.id !== photoId));
   };
 
-  // Send message via v2 chat API
+  // ── Send message via v2 chat API ──
   const sendMessage = async () => {
     if (!currentMessage.trim() && photos.length === 0) return;
 
-    // Add user message
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
@@ -135,7 +234,6 @@ export default function CustomerChatbot() {
     setIsLoading(true);
 
     try {
-      // Build conversation history for the v2 API (stateless fallback needs this)
       const conversationHistory = updatedMessages
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .map(m => ({ role: m.role, content: m.content }));
@@ -151,18 +249,21 @@ export default function CustomerChatbot() {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to get response');
-      }
+      if (!response.ok) throw new Error('Failed to get response');
 
       const data = await response.json();
 
-      // Track jobId for subsequent messages (full pipeline mode)
-      if (data.jobId && !jobId) {
-        setJobId(data.jobId);
+      // Track jobId
+      if (data.jobId) {
+        if (!jobId) setJobId(data.jobId);
+        localStorage.setItem(STORAGE_KEY, data.jobId);
       }
 
-      // Add assistant response
+      // Track conversation phase for triggering phone verification
+      if (data.conversationPhase) {
+        setConversationPhase(data.conversationPhase);
+      }
+
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -185,143 +286,184 @@ export default function CustomerChatbot() {
     }
   };
 
+  // ── Render ──
   return (
     <div className="flex flex-col h-screen max-w-2xl mx-auto bg-gray-50">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 shadow-lg">
-        <h1 className="text-xl font-bold">Odd Job Todd</h1>
-        <p className="text-sm text-blue-100">Professional Job Assessment Assistant</p>
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm ${
-                message.role === 'user'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-900 border border-gray-200'
-              }`}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold">Odd Job Todd</h1>
+            <p className="text-sm text-blue-100">Professional Job Assessment Assistant</p>
+          </div>
+          {isAuthenticated && view === 'chat' && (
+            <button
+              onClick={() => setView('my_jobs')}
+              className="text-xs text-blue-200 hover:text-white px-2 py-1 border border-blue-400 rounded"
             >
-              <p className="whitespace-pre-wrap">{message.content}</p>
-
-              {message.photos && (
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  {message.photos.map((photo, index) => (
-                    <img
-                      key={index}
-                      src={photo.preview}
-                      alt="Uploaded photo"
-                      className="rounded w-full h-20 object-cover"
-                    />
-                  ))}
-                </div>
-              )}
-
-              <p className={`text-xs mt-2 ${
-                message.role === 'user' ? 'text-blue-200' : 'text-gray-500'
-              }`}>
-                {new Date(message.timestamp).toLocaleTimeString('en-AU', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  hour12: false
-                })}
-              </p>
-            </div>
-          </div>
-        ))}
-
-        {isLoading && (
-          <div className="flex justify-start">
-            <div className="bg-white text-gray-900 border border-gray-200 px-4 py-3 rounded-2xl shadow-sm">
-              <div className="flex items-center space-x-1">
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-              </div>
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
+              My Enquiries
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Photo Preview */}
-      {photos.length > 0 && (
-        <div className="border-t border-gray-200 bg-white p-4">
-          <div className="flex flex-wrap gap-3">
-            {photos.map((photo) => (
-              <div key={photo.id} className="relative">
-                <img
-                  src={photo.preview}
-                  alt="Preview"
-                  className="w-16 h-16 object-cover rounded-xl border-2 border-gray-200 shadow-sm"
-                />
-                <button
-                  onClick={() => removePhoto(photo.id)}
-                  className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow-md transition-colors"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
-          </div>
+      {/* Loading */}
+      {view === 'loading' && (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
         </div>
       )}
 
-      {/* Input */}
-      <div className="border-t border-gray-200 bg-white p-4 shadow-lg">
-        <div className="flex space-x-3 items-end">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handlePhotoUpload}
-            accept="image/*"
-            multiple
-            className="hidden"
-          />
-
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="p-3 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all duration-200"
-            title="Add photos"
-          >
-            <Camera className="w-5 h-5" />
-          </button>
-
-          <button
-            onClick={toggleVoice}
-            className={`p-3 rounded-xl transition-all duration-200 ${
-              isListening
-                ? 'text-red-600 bg-red-50 animate-pulse'
-                : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'
-            }`}
-            title={isListening ? 'Stop recording' : 'Voice input'}
-          >
-            {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-          </button>
-
-          <input
-            type="text"
-            value={currentMessage}
-            onChange={(e) => setCurrentMessage(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-            placeholder="Describe your job in detail..."
-            className="flex-1 border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all duration-200"
-          />
-
-          <button
-            onClick={sendMessage}
-            disabled={isLoading || (!currentMessage.trim() && photos.length === 0)}
-            className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-3 rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 transition-all duration-200 shadow-sm font-medium"
-          >
-            <Send className="w-5 h-5" />
-          </button>
+      {/* My Jobs view */}
+      {view === 'my_jobs' && (
+        <div className="flex-1 overflow-y-auto p-4">
+          <MyJobsList onResumeJob={handleResumeJob} onNewEnquiry={handleNewEnquiry} />
         </div>
-      </div>
+      )}
+
+      {/* Chat view */}
+      {view === 'chat' && (
+        <>
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm ${
+                    message.role === 'user'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-900 border border-gray-200'
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap">{message.content}</p>
+
+                  {message.photos && (
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {message.photos.map((photo, index) => (
+                        <img
+                          key={index}
+                          src={photo.preview}
+                          alt="Uploaded photo"
+                          className="rounded w-full h-20 object-cover"
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  <p className={`text-xs mt-2 ${
+                    message.role === 'user' ? 'text-blue-200' : 'text-gray-500'
+                  }`}>
+                    {new Date(message.timestamp).toLocaleTimeString('en-AU', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: false
+                    })}
+                  </p>
+                </div>
+              </div>
+            ))}
+
+            {/* Phone verification inline */}
+            {showPhoneVerification && (
+              <div className="flex justify-start">
+                <div className="max-w-xs lg:max-w-md">
+                  <PhoneVerification jobId={jobId} onVerified={handlePhoneVerified} />
+                </div>
+              </div>
+            )}
+
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="bg-white text-gray-900 border border-gray-200 px-4 py-3 rounded-2xl shadow-sm">
+                  <div className="flex items-center space-x-1">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Photo Preview */}
+          {photos.length > 0 && (
+            <div className="border-t border-gray-200 bg-white p-4">
+              <div className="flex flex-wrap gap-3">
+                {photos.map((photo) => (
+                  <div key={photo.id} className="relative">
+                    <img
+                      src={photo.preview}
+                      alt="Preview"
+                      className="w-16 h-16 object-cover rounded-xl border-2 border-gray-200 shadow-sm"
+                    />
+                    <button
+                      onClick={() => removePhoto(photo.id)}
+                      className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow-md transition-colors"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Input */}
+          <div className="border-t border-gray-200 bg-white p-4 shadow-lg">
+            <div className="flex space-x-3 items-end">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handlePhotoUpload}
+                accept="image/*"
+                multiple
+                className="hidden"
+              />
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="p-3 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all duration-200"
+                title="Add photos"
+              >
+                <Camera className="w-5 h-5" />
+              </button>
+
+              <button
+                onClick={toggleVoice}
+                className={`p-3 rounded-xl transition-all duration-200 ${
+                  isListening
+                    ? 'text-red-600 bg-red-50 animate-pulse'
+                    : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'
+                }`}
+                title={isListening ? 'Stop recording' : 'Voice input'}
+              >
+                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              </button>
+
+              <input
+                type="text"
+                value={currentMessage}
+                onChange={(e) => setCurrentMessage(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                placeholder="Describe your job in detail..."
+                className="flex-1 border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all duration-200"
+              />
+
+              <button
+                onClick={sendMessage}
+                disabled={isLoading || (!currentMessage.trim() && photos.length === 0)}
+                className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-3 rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 transition-all duration-200 shadow-sm font-medium"
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
