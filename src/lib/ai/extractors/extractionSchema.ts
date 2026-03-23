@@ -79,6 +79,9 @@ export const messageExtractionSchema = z.object({
   clarityScore: lenientEnum(["very_clear", "clear", "vague", "confused"]),
   contactReadiness: lenientEnum(["offered", "willing", "reluctant", "refused"]),
 
+  // Job pivot detection
+  jobPivot: lenientEnum(["same_job", "additional_scope", "different_job"]),
+
   // Conversation state
   isComplete: z.boolean().default(false),
   missingInfo: z.array(z.string()).default([]),

@@ -1,80 +1,74 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { getFirebaseStorage } from '@/lib/firebase';
-import { v4 as uuidv4 } from 'uuid';
+/**
+ * POST /api/upload
+ *
+ * Uploads photos to Vercel Blob storage.
+ * Returns URLs that can be attached to chat messages.
+ */
+
+import { NextRequest, NextResponse } from "next/server";
+import { put } from "@vercel/blob";
+import { randomUUID } from "crypto";
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 
 export async function POST(request: NextRequest) {
-  // Upload feature gate — disabled by default for Sprint 5A
-  if (process.env.UPLOADS_ENABLED !== "true") {
-    return NextResponse.json(
-      { error: "File uploads are currently disabled" },
-      { status: 403 }
-    );
-  }
-
   try {
     const formData = await request.formData();
-    const files = formData.getAll('photos') as File[];
-    const jobId = formData.get('jobId') as string || uuidv4();
+    const files = formData.getAll("photos") as File[];
+    const jobId = (formData.get("jobId") as string) || "unlinked";
 
     if (!files.length) {
-      return NextResponse.json({ error: 'No files provided' }, { status: 400 });
+      return NextResponse.json({ error: "No files provided" }, { status: 400 });
     }
 
-    const uploadPromises = files.map(async (file) => {
-      if (!file.type.startsWith('image/')) {
-        throw new Error(`File ${file.name} is not an image`);
+    if (files.length > 5) {
+      return NextResponse.json({ error: "Maximum 5 photos per upload" }, { status: 400 });
+    }
+
+    const uploaded = [];
+
+    for (const file of files) {
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        return NextResponse.json(
+          { error: `${file.name}: only JPEG, PNG, and WebP images are accepted` },
+          { status: 400 }
+        );
       }
 
-      // Create unique filename
-      const fileName = `jobs/${jobId}/${uuidv4()}-${file.name}`;
-      const storageRef = ref(getFirebaseStorage(), fileName);
+      if (file.size > MAX_FILE_SIZE) {
+        return NextResponse.json(
+          { error: `${file.name}: file too large (max 10MB)` },
+          { status: 400 }
+        );
+      }
 
-      // Convert file to buffer
-      const buffer = await file.arrayBuffer();
-      const fileBuffer = Buffer.from(buffer);
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `jobs/${jobId}/${randomUUID()}.${ext}`;
 
-      // Upload to Firebase Storage
-      const snapshot = await uploadBytes(storageRef, fileBuffer, {
+      const blob = await put(path, file, {
+        access: "public",
         contentType: file.type,
       });
 
-      // Get download URL
-      const downloadURL = await getDownloadURL(snapshot.ref);
-
-      return {
-        originalName: file.name,
-        url: downloadURL,
+      uploaded.push({
+        url: blob.url,
+        filename: file.name,
         size: file.size,
         type: file.type,
-      };
-    });
-
-    const uploadedFiles = await Promise.all(uploadPromises);
+      });
+    }
 
     return NextResponse.json({
       success: true,
-      files: uploadedFiles,
+      files: uploaded,
       jobId,
     });
-
   } catch (error) {
-    console.error('Upload error:', error);
+    console.error("Upload error:", error);
     return NextResponse.json(
-      { error: `Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}` },
+      { error: `Upload failed: ${error instanceof Error ? error.message : "Unknown error"}` },
       { status: 500 }
     );
   }
-}
-
-// Handle OPTIONS request for CORS
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
-  });
 }

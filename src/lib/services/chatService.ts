@@ -42,6 +42,15 @@ import { scoreQuoteWorthiness } from "../domain/scoring/quoteWorthinessService";
 import { generateRecommendation } from "../domain/scoring/recommendationService";
 import { inferEffortBand } from "../domain/estimates/effortBandService";
 import { generateRomEstimate } from "../domain/estimates/estimateService";
+import {
+  ensureSemanticObject,
+  recordStateSnapshot,
+  recordScores,
+  recordEvidence,
+  recordInstrument,
+  recordStatusTransition,
+  type SemanticJobContext,
+} from "../domain/bridge/semanticRuntimeAdapter";
 
 // ── Types ────────────────────────────────────
 
@@ -50,10 +59,12 @@ export interface ChatInput {
   customerId: string;
   message: string;
   messageType?: "text" | "voice" | "image";
+  photos?: string[]; // Vercel Blob URLs
 }
 
 export interface ChatResult {
   reply: string;
+  jobId: string; // May differ from input if job pivot created a new job
   extraction: MessageExtraction;
   jobState: AccumulatedJobState;
   conversationPhase: string;
@@ -107,6 +118,14 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
 
   if (!job) throw new Error(`Job not found: ${input.jobId}`);
 
+  // ── Semantic layer: ensure object exists ──
+  let semCtx: SemanticJobContext = await ensureSemanticObject(
+    db, input.jobId, job.jobType ?? null
+  );
+
+  // ── Semantic layer: record customer message as evidence ──
+  recordEvidence(db, semCtx, savedMsg.id, input.message, "customer");
+
   let currentState = loadJobState(job);
 
   // 3. Build conversation summary from recent messages
@@ -123,9 +142,16 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
     .join("\n");
 
   // 4. Run extraction LLM
+  // Append photo context if photos were sent
+  let messageForExtraction = input.message;
+  if (input.photos && input.photos.length > 0) {
+    messageForExtraction += `\n[Customer also sent ${input.photos.length} photo(s)]`;
+    currentState.photosReferenced = true;
+  }
+
   const extractionPrompt = buildExtractionPrompt(
     currentState,
-    input.message,
+    messageForExtraction,
     conversationSummary
   );
 
@@ -153,6 +179,26 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
     console.warn("[chatService] Extraction parse failed:", (err as Error).message?.substring(0, 200));
     console.warn("[chatService] Raw extraction text:", extractionText.substring(0, 300));
     extraction = messageExtractionSchema.parse({});
+  }
+
+  // 4b. Handle job pivot — if customer switched to a completely different job,
+  // create a new job record instead of merging into the current one.
+  if (extraction.jobPivot === "different_job" && currentState.jobType) {
+    // Save current job state as-is (don't overwrite with new extraction)
+    await db.update(schema.jobs).set({ metadata: currentState }).where(eq(schema.jobs.id, input.jobId));
+
+    // Create a new job for the different work
+    const [newJob] = await db.insert(schema.jobs).values({
+      organisationId: job.organisationId,
+      customerId: input.customerId || undefined,
+      leadSource: "website_chat" as const,
+      status: "new_lead" as const,
+    }).returning();
+
+    // Re-run with the new job — reset state, use the new extraction
+    input.jobId = newJob.id;
+    // We'll continue processing with a fresh state below
+    currentState = accumulatedJobStateSchema.parse({});
   }
 
   // 5. Merge extraction into accumulated state
@@ -191,6 +237,18 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
   mergedState.recommendation = recResult.recommendation;
   mergedState.recommendationReason = recResult.reason;
 
+  // ── Semantic layer: record state snapshot + scores ──
+  semCtx = await recordStateSnapshot(
+    db, semCtx, mergeResult, mergedState, `message:${savedMsg.id}`
+  );
+  recordScores(db, semCtx, {
+    customerFitScore: mergedState.customerFitScore,
+    customerFitLabel: mergedState.customerFitLabel,
+    quoteWorthinessScore: mergedState.quoteWorthinessScore,
+    quoteWorthinessLabel: mergedState.quoteWorthinessLabel,
+    completenessScore: mergedState.completenessScore,
+  });
+
   // 9. Evaluate conversation state → decide action
   const action = evaluateConversationState(mergedState);
   const systemInjection = generateSystemInjection(action);
@@ -223,13 +281,16 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
       : "Sorry, something went wrong. Can you say that again?";
 
   // 12. Save AI reply
-  await db.insert(schema.messages).values({
+  const [savedReply] = await db.insert(schema.messages).values({
     jobId: input.jobId,
     customerId: custId || undefined,
     senderType: "ai",
     messageType: "text",
     rawContent: reply,
-  });
+  }).returning();
+
+  // ── Semantic layer: record AI reply as evidence ──
+  recordEvidence(db, semCtx, savedReply.id, reply, "ai");
 
   // 13. Update job record with all scores
   const jobUpdates: Record<string, unknown> = {
@@ -278,6 +339,9 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
       actorType: "system" as const,
       reason: `Conversation phase: ${extraction.conversationPhase}`,
     });
+
+    // ── Semantic layer: record status transition ──
+    recordStatusTransition(db, semCtx, oldStatus, newStatus, `phase:${extraction.conversationPhase}`);
   }
 
   // Save estimate record if presenting one — also write back to jobs table
@@ -332,6 +396,17 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
 
     // Re-set metadata since we enriched it
     jobUpdates.metadata = mergedState;
+
+    // ── Semantic layer: record ROM instrument ──
+    recordInstrument(db, semCtx, {
+      effortBand: effortResult.band,
+      costMin: romEstimate.costMin,
+      costMax: romEstimate.costMax,
+      hoursMin: romEstimate.hoursMin,
+      hoursMax: romEstimate.hoursMax,
+      labourOnly: romEstimate.labourOnly,
+      materialsNote: romEstimate.materialsNote || undefined,
+    });
   }
 
   await db
@@ -342,6 +417,7 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
   // 14. Return full result
   return {
     reply,
+    jobId: input.jobId,
     extraction,
     jobState: mergedState,
     conversationPhase: extraction.conversationPhase,

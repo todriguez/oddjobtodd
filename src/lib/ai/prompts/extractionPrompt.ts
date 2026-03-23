@@ -59,6 +59,7 @@ Return this JSON structure. Use null for genuinely unknown fields:
   "cheapestMindset": boolean | null,
   "clarityScore": "very_clear" | "clear" | "vague" | "confused" | null,
   "contactReadiness": "offered" | "willing" | "reluctant" | "refused" | null,
+  "jobPivot": "same_job" | "additional_scope" | "different_job" | null,
   "isComplete": boolean,
   "missingInfo": string[],
   "conversationPhase": "greeting" | "describing_job" | "providing_details" | "providing_location" | "providing_contact" | "reviewing_estimate" | "confirmed" | "disengaged"
@@ -128,6 +129,13 @@ EXTRACTION RULES:
 7. MISSING INFO — list what would help most right now.
 
 8. SUBURB — extract any Sunshine Coast suburb mentioned. Common ones: Noosa Heads, Noosaville, Sunshine Beach, Tewantin, Cooroy, Peregian Beach, Maroochydore, Mooloolaba, Buderim, Caloundra, Nambour, Coolum Beach, Eumundi, Doonan. Also extract from context like "I'm in Noosa" → "Noosa Heads".
+
+9. JOB PIVOT — detect when the customer changes topic mid-conversation:
+   - Same work, more details about the current job → "same_job"
+   - Adding related scope ("also need...", "while you're here...", "and the kitchen too") that's the SAME TRADE → "additional_scope"
+   - Completely DIFFERENT trade or unrelated work (fencing → painting, plumbing → carpentry) → "different_job"
+   - First message or no prior job context → null
+   - If unsure, use "same_job" — only use "different_job" when it's clearly a separate job
 
 ${buildCategoryAwareExtractionHints(currentState)}
 Output ONLY the raw JSON object. No \`\`\`json fences. No markdown. No explanation.`;

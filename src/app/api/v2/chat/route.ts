@@ -46,6 +46,7 @@ const chatRequestSchema = z.object({
     content: z.string(),
   })).optional(),
   messageType: z.enum(["text", "voice", "image"]).default("text"),
+  photos: z.array(z.string().url()).optional(),
 });
 
 /**
@@ -168,13 +169,16 @@ async function handleFullPipeline(
     customerId: customerId || sessionCustomerId || "",
     message,
     messageType,
+    photos: parsed.photos,
   });
 
-  log.info({ jobId, phase: result.conversationPhase }, "chat.message.processed");
+  // Use the result's jobId — may differ if a job pivot created a new job
+  const finalJobId = result.jobId || jobId;
+  log.info({ jobId: finalJobId, phase: result.conversationPhase }, "chat.message.processed");
 
   return NextResponse.json({
     reply: result.reply,
-    jobId,
+    jobId: finalJobId,
     conversationPhase: result.conversationPhase,
     completenessScore: result.completenessScore,
     estimatePresented: result.estimatePresented,

@@ -234,6 +234,27 @@ export default function CustomerChatbot() {
     setIsLoading(true);
 
     try {
+      // Upload photos first if any
+      let photoUrls: string[] = [];
+      if (userMessage.photos && userMessage.photos.length > 0) {
+        try {
+          const formData = new FormData();
+          for (const p of userMessage.photos) {
+            formData.append('photos', p.file);
+          }
+          if (jobId) formData.append('jobId', jobId);
+
+          const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+          if (uploadRes.ok) {
+            const uploadData = await uploadRes.json();
+            photoUrls = uploadData.files?.map((f: { url: string }) => f.url) || [];
+          }
+        } catch {
+          // Photo upload failed — continue without photos
+          console.warn('Photo upload failed, continuing without photos');
+        }
+      }
+
       const conversationHistory = updatedMessages
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .map(m => ({ role: m.role, content: m.content }));
@@ -244,8 +265,9 @@ export default function CustomerChatbot() {
         body: JSON.stringify({
           message: currentMessage,
           messages: conversationHistory,
-          messageType: 'text',
+          messageType: photoUrls.length > 0 ? 'image' : 'text',
           ...(jobId ? { jobId } : {}),
+          ...(photoUrls.length > 0 ? { photos: photoUrls } : {}),
         }),
       });
 
@@ -253,9 +275,9 @@ export default function CustomerChatbot() {
 
       const data = await response.json();
 
-      // Track jobId
+      // Track jobId — may change if a job pivot created a new job
       if (data.jobId) {
-        if (!jobId) setJobId(data.jobId);
+        setJobId(data.jobId);
         localStorage.setItem(STORAGE_KEY, data.jobId);
       }
 
