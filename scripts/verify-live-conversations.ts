@@ -80,7 +80,7 @@ async function checkHealth(): Promise<boolean> {
     const res = await fetch(`${BASE_URL}/api/v2/health`);
     if (!res.ok) return false;
     const data = await res.json();
-    return data.database === true;
+    return data.database === "connected" || data.database === true;
   } catch {
     return false;
   }

@@ -28,14 +28,6 @@ export async function checkJobOwnership(
 
   const customerId = request.headers.get("x-session-customer-id");
 
-  // No session — ownership can't be verified
-  if (!customerId) {
-    return NextResponse.json(
-      { error: "Unauthorized: no session" },
-      { status: 401 }
-    );
-  }
-
   const db = await getDb();
   const [job] = await db
     .select({ customerId: jobs.customerId })
@@ -47,9 +39,17 @@ export async function checkJobOwnership(
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
 
-  // Job has no customer yet (anonymous conversation in progress) — allow if
-  // this is the customer who started it (will be linked after OTP verify)
+  // Job has no customer yet (anonymous conversation in progress) — allow
+  // anonymous continuation. The job will be linked to a customer after OTP verify.
   if (!job.customerId) return null;
+
+  // No session but job has an owner — can't verify ownership
+  if (!customerId) {
+    return NextResponse.json(
+      { error: "Unauthorized: no session" },
+      { status: 401 }
+    );
+  }
 
   if (job.customerId !== customerId) {
     log.warn(

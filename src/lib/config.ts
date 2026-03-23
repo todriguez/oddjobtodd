@@ -16,7 +16,7 @@ const configSchema = z.object({
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
   ADMIN_EMAIL: z.string().email(),
   ADMIN_PASSWORD_HASH: z.string().min(1, "ADMIN_PASSWORD_HASH required (salt:hash via scripts/hash-password.ts)"),
-  ANTHROPIC_API_KEY: z.string().startsWith("sk-ant-"),
+  ANTHROPIC_API_KEY: z.string().refine(v => v.replace(/^"|"$/g, '').startsWith("sk-ant-"), { message: 'must start with "sk-ant-"' }),
 
   // ── Optional: dual-key rotation ──────────
   JWT_SECRET_PREVIOUS: z.string().min(32).optional(),
