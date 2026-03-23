@@ -31,7 +31,7 @@ const LIMITER_CONFIGS = {
   chatPerSession: { limit: 30, windowSeconds: 600 },        // 30 per 10 min
   chatPerIp: { limit: 60, windowSeconds: 3600 },            // 60 per hour
   adminLogin: { limit: 5, windowSeconds: 900 },             // 5 per 15 min
-  newConversationPerIp: { limit: 5, windowSeconds: 3600 },  // 5 per hour
+  newConversationPerIp: { limit: 20, windowSeconds: 3600 }, // 20/hr dev, lower for prod
 } as const;
 
 export type LimiterName = keyof typeof LIMITER_CONFIGS;
