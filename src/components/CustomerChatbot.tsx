@@ -35,6 +35,7 @@ export default function CustomerChatbot() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [channelId, setChannelId] = useState<string | null>(null);
   const [conversationPhase, setConversationPhase] = useState<string | null>(null);
   const [showPhoneVerification, setShowPhoneVerification] = useState(false);
 
@@ -63,15 +64,18 @@ export default function CustomerChatbot() {
       return;
     }
 
-    // ?jobId=xxx param: open a specific job's conversation (e.g. from SMS link)
+    // ?jobId=xxx&channelId=yyy params: open a specific job/channel (e.g. from SMS link)
     const jobIdParam = params.get('jobId');
+    const channelIdParam = params.get('channelId');
     if (jobIdParam) {
       setJobId(jobIdParam);
+      if (channelIdParam) setChannelId(channelIdParam);
       localStorage.setItem(STORAGE_KEY, jobIdParam);
       await loadConversationHistory(jobIdParam);
-      // Strip ?jobId from URL
+      // Strip params from URL
       const url = new URL(window.location.href);
       url.searchParams.delete('jobId');
+      url.searchParams.delete('channelId');
       window.history.replaceState({}, '', url.pathname + url.search);
       setView('chat');
       return;
@@ -294,6 +298,7 @@ export default function CustomerChatbot() {
           messages: conversationHistory,
           messageType: photoUrls.length > 0 ? 'image' : 'text',
           ...(jobId ? { jobId } : {}),
+          ...(channelId ? { channelId } : {}),
           ...(photoUrls.length > 0 ? { photos: photoUrls } : {}),
         }),
       });

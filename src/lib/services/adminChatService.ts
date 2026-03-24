@@ -17,6 +17,8 @@ import {
   updateJobStatus,
   getScheduleSummary,
   generateFormalQuote,
+  listChannels,
+  viewChannel,
 } from "./adminChatTools";
 
 const log = createLogger("admin-chat");
@@ -185,6 +187,28 @@ const TOOLS: Anthropic.Tool[] = [
       required: ["jobId"],
     },
   },
+  {
+    name: "list_channels",
+    description: "List all conversation channels on a job, showing participants and their roles. Use to see who is involved and which channels exist.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        jobId: { type: "string", description: "The job UUID" },
+      },
+      required: ["jobId"],
+    },
+  },
+  {
+    name: "view_channel",
+    description: "View messages in a specific conversation channel. Use to see what a specific participant has been discussing.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        channelId: { type: "string", description: "The channel UUID" },
+      },
+      required: ["channelId"],
+    },
+  },
 ];
 
 // ─────────────────────────────────────────────
@@ -209,6 +233,10 @@ async function executeTool(name: string, input: any): Promise<any> {
       return getScheduleSummary(input);
     case "generate_formal_quote":
       return generateFormalQuote(input);
+    case "list_channels":
+      return listChannels(input);
+    case "view_channel":
+      return viewChannel(input);
     default:
       return { error: `Unknown tool: ${name}` };
   }

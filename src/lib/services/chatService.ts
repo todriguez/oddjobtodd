@@ -20,7 +20,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { getDb } from "../db/client";
 import * as schema from "../db/schema";
 import {
@@ -60,6 +60,7 @@ export interface ChatInput {
   message: string;
   messageType?: "text" | "voice" | "image";
   photos?: string[]; // Vercel Blob URLs
+  channelId?: string; // Conversation channel for multi-participant scoping
 }
 
 export interface ChatResult {
@@ -101,6 +102,7 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
       senderType: "customer",
       messageType: input.messageType || "text",
       rawContent: input.message,
+      channelId: input.channelId || undefined,
     })
     .returning();
 
@@ -129,10 +131,14 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
   let currentState = loadJobState(job);
 
   // 3. Build conversation summary from recent messages
+  //    If channelId is set, scope to that channel only (multi-participant privacy)
+  const messageFilter = input.channelId
+    ? and(eq(schema.messages.jobId, input.jobId), eq(schema.messages.channelId, input.channelId))
+    : eq(schema.messages.jobId, input.jobId);
   const recentMessages = await db
     .select()
     .from(schema.messages)
-    .where(eq(schema.messages.jobId, input.jobId))
+    .where(messageFilter)
     .orderBy(desc(schema.messages.createdAt))
     .limit(20);
 
@@ -295,6 +301,7 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
     senderType: "ai",
     messageType: "text",
     rawContent: reply,
+    channelId: input.channelId || undefined,
   }).returning();
 
   // ── Semantic layer: record AI reply as evidence ──

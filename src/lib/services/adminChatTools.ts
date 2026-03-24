@@ -489,3 +489,79 @@ export async function generateFormalQuote(params: GenerateFormalQuoteParams) {
     lineItems,
   };
 }
+
+// ─────────────────────────────────────────────
+// 9. list_channels
+// ─────────────────────────────────────────────
+
+export async function listChannels(params: { jobId: string }) {
+  // Import dynamically to avoid circular deps with kernel
+  const { getChannelsForObject, getParticipants } = await import("@/lib/semantos-kernel/channelService");
+  const { ensureSemanticObject } = await import("@/lib/domain/bridge/semanticRuntimeAdapter");
+
+  const db = await getDb();
+
+  // Find the semantic object for this job
+  const [job] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, params.jobId)).limit(1);
+  if (!job) return { error: "Job not found" };
+
+  // Get semantic object ID (may not exist if job was never processed)
+  try {
+    const semCtx = await ensureSemanticObject(db, params.jobId, job.jobType);
+    const objectId = semCtx.semanticObjectId;
+
+    const allChannels = await getChannelsForObject(objectId);
+    const allParticipants = await getParticipants(objectId);
+
+    const participantMap = new Map(allParticipants.map((p) => [p.id, p]));
+
+    return {
+      jobId: params.jobId,
+      channels: allChannels.map((ch) => ({
+        id: ch.id,
+        kind: ch.channelKind,
+        label: ch.label,
+        isActive: ch.isActive,
+        participants: (ch.participantIds as string[]).map((pid) => {
+          const p = participantMap.get(pid);
+          return p ? { id: p.id, name: p.displayName, role: p.participantRole, kind: p.identityKind } : { id: pid };
+        }),
+        createdAt: ch.createdAt,
+      })),
+      participantCount: allParticipants.length,
+    };
+  } catch {
+    return { channels: [], participantCount: 0, note: "No semantic object for this job yet" };
+  }
+}
+
+// ─────────────────────────────────────────────
+// 10. view_channel
+// ─────────────────────────────────────────────
+
+export async function viewChannel(params: { channelId: string }) {
+  const db = await getDb();
+
+  const msgs = await db
+    .select({
+      id: schema.messages.id,
+      senderType: schema.messages.senderType,
+      content: schema.messages.rawContent,
+      messageType: schema.messages.messageType,
+      createdAt: schema.messages.createdAt,
+    })
+    .from(schema.messages)
+    .where(eq(schema.messages.channelId, params.channelId))
+    .orderBy(asc(schema.messages.createdAt));
+
+  return {
+    channelId: params.channelId,
+    messages: msgs.map((m) => ({
+      sender: m.senderType,
+      type: m.messageType,
+      content: m.content,
+      time: m.createdAt,
+    })),
+    count: msgs.length,
+  };
+}
