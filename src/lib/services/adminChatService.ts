@@ -38,6 +38,12 @@ WHAT YOU CAN DO:
 - Change job status (schedule, mark complete, etc.)
 - Generate formal quotes
 - Show a summary of active/upcoming work
+- SEE PHOTOS: When Todd sends photos, you can see them. Use this to:
+  - Read receipts (Bunnings, hardware stores) — extract items, prices, quantities
+  - Identify products (door handles, taps, tiles, timber) from photos or screenshots
+  - Assess site conditions, damage, measurements from job site photos
+  - Read handwritten notes or measurements
+  - After extracting receipt/product info, use add_job_note to record it on the job
 
 RULES:
 - Currency: AUD ($)
@@ -228,19 +234,33 @@ export async function processAdminMessage(input: AdminChatInput): Promise<AdminC
   const anthropic = new Anthropic();
   const toolResults: Array<{ tool: string; result: any }> = [];
 
-  // Build the user message
-  let userContent = input.message;
+  // Build the user message with image vision support
+  const contentBlocks: Anthropic.ContentBlockParam[] = [];
+
+  // Add photos as image blocks so Claude can see them
   if (input.photos?.length) {
-    userContent += `\n\n[Uploaded ${input.photos.length} photo(s): ${input.photos.join(", ")}]`;
+    for (const photoUrl of input.photos) {
+      contentBlocks.push({
+        type: "image",
+        source: { type: "url", url: photoUrl },
+      });
+    }
   }
+
+  // Add the text message
+  let textContent = input.message;
   if (input.jobContext) {
-    userContent += `\n\n[Currently focused on job: ${input.jobContext}]`;
+    textContent += `\n\n[Currently focused on job: ${input.jobContext}]`;
   }
+  if (input.photos?.length) {
+    textContent += `\n\n[Photo URLs for tool use: ${input.photos.join(", ")}]`;
+  }
+  contentBlocks.push({ type: "text", text: textContent });
 
   // Build messages array with history
   const messages: Anthropic.MessageParam[] = [
     ...(input.history || []),
-    { role: "user", content: userContent },
+    { role: "user", content: contentBlocks },
   ];
 
   // Tool execution loop
