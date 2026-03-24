@@ -40,6 +40,7 @@ const chatRequestSchema = z.object({
   jobId: z.string().uuid().optional(),
   organisationId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
+  channelId: z.string().optional(),  // conversation channel (multi-participant)
   message: z.string().min(1, "Message cannot be empty"),
   messages: z.array(z.object({
     role: z.enum(["user", "assistant"]),
@@ -170,6 +171,7 @@ async function handleFullPipeline(
     message,
     messageType,
     photos: parsed.photos,
+    channelId: parsed.channelId,
   });
 
   // Use the result's jobId — may differ if a job pivot created a new job
