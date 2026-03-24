@@ -8,6 +8,12 @@
 export function buildSystemPrompt(context?: {
   operatorName?: string;
   serviceArea?: string;
+  pdfImportContext?: {
+    address: string;
+    tasks: string[];
+    agentName?: string;
+    gaps: string[];
+  };
 }): string {
   const name = context?.operatorName || "Todd";
   const area = context?.serviceArea || "Sunshine Coast (Noosa area, 30-60min radius)";
@@ -104,5 +110,31 @@ IMPORTANT RULES:
 - Every message saves automatically — there is no submit button
 - If the customer drops off, that's ok — the partial record is saved
 - Don't rush to a conclusion — a good conversation produces better job records
-- If someone asks for exact pricing, say: "Hard to be exact without seeing it, but I can give you a rough idea of what these jobs usually run"`;
+- If someone asks for exact pricing, say: "Hard to be exact without seeing it, but I can give you a rough idea of what these jobs usually run"${context?.pdfImportContext ? buildPdfImportSection(context.pdfImportContext) : ""}`;
+}
+
+function buildPdfImportSection(ctx: {
+  address: string;
+  tasks: string[];
+  agentName?: string;
+  gaps: string[];
+}): string {
+  const taskList = ctx.tasks.map((t) => `- ${t}`).join("\n");
+  const gapList = ctx.gaps.map((g) => `- ${g}`).join("\n");
+
+  return `
+
+PDF IMPORT CONTEXT:
+This customer was referred by a real estate agent${ctx.agentName ? ` (${ctx.agentName})` : ""}. A job sheet PDF listed work at ${ctx.address}.
+
+Tasks from the PDF:
+${taskList}
+
+${ctx.gaps.length > 0 ? `Missing info needed for a rough estimate:\n${gapList}\n` : ""}
+IMPORTANT FOR PDF IMPORTS:
+- Do NOT re-ask things already known from the PDF (address, task list, etc.)
+- Your job is to fill in the GAPS by asking the customer naturally
+- Start by confirming the work briefly, then ask about the first gap
+- If photos would help, ask casually — "got a photo handy?"
+- The customer may not know all the technical details — that's OK`;
 }

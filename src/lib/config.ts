@@ -33,6 +33,9 @@ const configSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().min(1).optional(),
   TWILIO_VERIFY_SID: z.string().startsWith("VA").optional(),
 
+  // ── Optional: Twilio outbound SMS (for sending links to customers) ─
+  TWILIO_FROM_NUMBER: z.string().startsWith("+").optional(),
+
   // ── Feature flags ────────────────────────
   UPLOADS_ENABLED: z
     .enum(["true", "false"])
@@ -68,6 +71,11 @@ export const hasUpstash = () => {
 export const hasTwilio = () => {
   const c = getConfig();
   return !!(c.TWILIO_ACCOUNT_SID && c.TWILIO_AUTH_TOKEN && c.TWILIO_VERIFY_SID);
+};
+
+export const hasTwilioSms = () => {
+  const c = getConfig();
+  return !!(c.TWILIO_ACCOUNT_SID && c.TWILIO_AUTH_TOKEN && c.TWILIO_FROM_NUMBER);
 };
 
 export const hasPostgres = () => !!getConfig().DATABASE_URL;

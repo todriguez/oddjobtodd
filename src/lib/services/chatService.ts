@@ -260,8 +260,16 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
     mergedState.estimatePresented = true;
   }
 
-  // 10. Build chat messages
-  const systemPrompt = buildSystemPrompt();
+  // 10. Build chat messages (with PDF context if applicable)
+  const pdfImportContext = job.leadSource === "agent_pdf" && mergedState.importedTasks?.length
+    ? {
+        address: mergedState.address || mergedState.suburb || "the property",
+        tasks: mergedState.importedTasks.map((t: { description: string }) => t.description),
+        agentName: mergedState.referringAgentName || undefined,
+        gaps: mergedState.missingInfo || [],
+      }
+    : undefined;
+  const systemPrompt = buildSystemPrompt({ pdfImportContext });
   const chatMessages: Anthropic.MessageParam[] = buildChatMessages(
     recentMessages,
     systemInjection

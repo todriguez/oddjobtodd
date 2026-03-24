@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "if [ -n \"$DATABASE_URL\" ]; then drizzle-kit migrate; else echo 'Skipping migration: no DATABASE_URL'; fi && next build",
+    "db:migrate": "drizzle-kit migrate",
     "start": "next start",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
