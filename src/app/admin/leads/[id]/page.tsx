@@ -93,6 +93,13 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const [rescoreResult, setRescoreResult] = useState<any>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
+  // SMS panel state
+  const [showSmsPanel, setShowSmsPanel] = useState(false);
+  const [smsPhone, setSmsPhone] = useState("");
+  const [smsMessage, setSmsMessage] = useState("");
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsResult, setSmsResult] = useState<{ success: boolean; error?: string } | null>(null);
+
   useEffect(() => {
     fetch(`/api/v2/admin/leads/${id}`)
       .then((r) => r.json())
@@ -323,7 +330,113 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 {action.replace(/_/g, " ").replace(/^\w/, c => c.toUpperCase())}
               </button>
             ))}
+            <button
+              onClick={() => {
+                setShowSmsPanel(!showSmsPanel);
+                setSmsResult(null);
+                // Pre-fill from metadata
+                if (!smsPhone && metadata?.customerPhone) setSmsPhone(metadata.customerPhone);
+                if (!smsMessage) {
+                  const addr = metadata?.address || metadata?.suburb || "the property";
+                  const link = `https://oddjobtodd.vercel.app/?jobId=${id}`;
+                  setSmsMessage(`Hi${metadata?.customerName ? ` ${metadata.customerName}` : ""}, Todd's been asked to look at some work at ${addr}. Could you help with a few details? ${link}`);
+                }
+              }}
+              className="px-3 py-1.5 text-xs font-medium rounded border border-blue-200 text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              SMS Tenant
+            </button>
           </div>
+
+          {/* SMS Panel */}
+          {showSmsPanel && (
+            <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
+              <h4 className="text-sm font-medium text-blue-800">Send SMS</h4>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    const addr = metadata?.address || metadata?.suburb || "the property";
+                    const link = `https://oddjobtodd.vercel.app/?jobId=${id}`;
+                    setSmsMessage(`Hi${metadata?.customerName ? ` ${metadata.customerName}` : ""}, Todd's been asked to look at some work at ${addr}. Could you help with a few details? ${link}`);
+                  }}
+                  className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200"
+                >
+                  More info template
+                </button>
+                <button
+                  onClick={() => {
+                    const addr = metadata?.address || metadata?.suburb || "the property";
+                    const link = `https://oddjobtodd.vercel.app/?jobId=${id}`;
+                    setSmsMessage(`Hi${metadata?.customerName ? ` ${metadata.customerName}` : ""}, Todd needs to come by ${addr} to take a look before quoting. When suits you? ${link}`);
+                  }}
+                  className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200"
+                >
+                  Inspection template
+                </button>
+              </div>
+              <div>
+                <label className="block text-xs text-blue-700 mb-1">Phone</label>
+                <input
+                  className="w-full border border-blue-200 rounded px-2 py-1.5 text-sm bg-white"
+                  value={smsPhone}
+                  onChange={(e) => setSmsPhone(e.target.value)}
+                  placeholder="04XX XXX XXX"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-blue-700 mb-1">Message</label>
+                <textarea
+                  className="w-full border border-blue-200 rounded px-2 py-1.5 text-sm bg-white h-24 resize-y"
+                  value={smsMessage}
+                  onChange={(e) => setSmsMessage(e.target.value)}
+                />
+                <div className="text-xs text-blue-500 mt-0.5">{smsMessage.length}/640 chars</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    setSmsSending(true);
+                    setSmsResult(null);
+                    try {
+                      const res = await fetch("/api/v2/admin/import-job/send-sms", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ jobId: id, phone: smsPhone, message: smsMessage }),
+                      });
+                      if (!res.ok) {
+                        const d = await res.json().catch(() => ({ error: "Failed" }));
+                        setSmsResult({ success: false, error: d.error });
+                      } else {
+                        setSmsResult({ success: true });
+                        // Refresh data to show updated status
+                        const refresh = await fetch(`/api/v2/admin/leads/${id}`);
+                        setData(await refresh.json());
+                      }
+                    } catch (e: any) {
+                      setSmsResult({ success: false, error: e.message });
+                    } finally {
+                      setSmsSending(false);
+                    }
+                  }}
+                  disabled={smsSending || !smsPhone || !smsMessage}
+                  className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition"
+                >
+                  {smsSending ? "Sending..." : "Send SMS"}
+                </button>
+                <button
+                  onClick={() => setShowSmsPanel(false)}
+                  className="text-xs text-gray-500 hover:text-gray-700"
+                >
+                  Cancel
+                </button>
+              </div>
+              {smsResult && (
+                <div className={`text-xs p-2 rounded ${smsResult.success ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+                  {smsResult.success ? "SMS sent successfully" : `Failed: ${smsResult.error}`}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Outcome display */}
           {outcome && (

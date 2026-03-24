@@ -119,6 +119,7 @@ export const leadSourceEnum = pgEnum("lead_source", [
   "referral",
   "repeat",
   "walk_in",
+  "agent_pdf",
   "other",
 ]);
 

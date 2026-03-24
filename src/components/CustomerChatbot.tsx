@@ -63,6 +63,20 @@ export default function CustomerChatbot() {
       return;
     }
 
+    // ?jobId=xxx param: open a specific job's conversation (e.g. from SMS link)
+    const jobIdParam = params.get('jobId');
+    if (jobIdParam) {
+      setJobId(jobIdParam);
+      localStorage.setItem(STORAGE_KEY, jobIdParam);
+      await loadConversationHistory(jobIdParam);
+      // Strip ?jobId from URL
+      const url = new URL(window.location.href);
+      url.searchParams.delete('jobId');
+      window.history.replaceState({}, '', url.pathname + url.search);
+      setView('chat');
+      return;
+    }
+
     try {
       const res = await fetch('/api/v2/auth/session');
       if (res.ok) {

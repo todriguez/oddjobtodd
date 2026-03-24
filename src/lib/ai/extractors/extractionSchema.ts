@@ -169,6 +169,19 @@ export const accumulatedJobStateSchema = z.object({
   romConfidence: z.enum(["low", "medium", "high"]).nullable().default(null),
   labourOnly: z.boolean().nullable().default(null),
   materialsNote: z.string().nullable().default(null),
+
+  // PDF import metadata (set when job is created from agent PDF)
+  pdfImportSource: z.string().nullable().default(null),       // e.g. "Ray White Noosa"
+  referringAgentName: z.string().nullable().default(null),
+  referringAgentPhone: z.string().nullable().default(null),
+  referringAgentEmail: z.string().nullable().default(null),
+  importedTasks: z.array(z.object({
+    description: z.string(),
+    category: z.string().nullable().default(null),
+    urgency: z.string().nullable().default(null),
+    location: z.string().nullable().default(null),
+    repairOrReplace: z.string().nullable().default(null),
+  })).default([]),
 });
 
 export type AccumulatedJobState = z.infer<typeof accumulatedJobStateSchema>;

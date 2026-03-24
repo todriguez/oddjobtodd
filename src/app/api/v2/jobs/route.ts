@@ -11,7 +11,7 @@ const createJobSchema = z.object({
   customerId: z.string().uuid().optional(),
   siteId: z.string().uuid().optional(),
   assignedOperatorId: z.string().uuid().optional(),
-  leadSource: z.enum(["website_chat", "facebook", "instagram", "phone", "referral", "repeat", "walk_in", "other"]).default("website_chat"),
+  leadSource: z.enum(["website_chat", "facebook", "instagram", "phone", "referral", "repeat", "walk_in", "agent_pdf", "other"]).default("website_chat"),
   jobType: z.enum(["carpentry", "plumbing", "electrical", "painting", "general", "fencing", "tiling", "roofing", "doors_windows", "gardening", "cleaning", "other"]).default("general"),
   subcategory: z.string().optional(),
   descriptionRaw: z.string().optional(),
