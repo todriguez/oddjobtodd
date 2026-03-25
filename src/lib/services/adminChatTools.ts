@@ -565,3 +565,63 @@ export async function viewChannel(params: { channelId: string }) {
     count: msgs.length,
   };
 }
+
+// ─────────────────────────────────────────────
+// 11. send_to_channel
+// ─────────────────────────────────────────────
+
+export async function sendToChannel(params: { channelId: string; message: string }) {
+  const db = await getDb();
+  const { getChannel } = await import("@/lib/semantos-kernel/channelService");
+
+  // Validate channel exists
+  const channel = await getChannel(params.channelId);
+  if (!channel) return { error: "Channel not found" };
+
+  // Find the job associated with this channel's semantic object
+  const { semanticObjects } = await import("@/lib/semantos-kernel/schema.core");
+  const [semObj] = await db
+    .select()
+    .from(semanticObjects)
+    .where(eq(semanticObjects.id, channel.objectId))
+    .limit(1);
+
+  // Find the linked job via externalId
+  let jobId: string | null = null;
+  if (semObj?.externalId) {
+    jobId = semObj.externalId;
+  }
+
+  if (!jobId) return { error: "Cannot determine job for this channel" };
+
+  // Insert operator message with channelId
+  const [savedMsg] = await db
+    .insert(schema.messages)
+    .values({
+      jobId,
+      senderType: "operator",
+      messageType: "text",
+      rawContent: params.message,
+      channelId: params.channelId,
+    })
+    .returning();
+
+  // Record evidence (non-fatal for legacy jobs without semantic objects)
+  try {
+    const { ensureSemanticObject, recordEvidence } = await import("@/lib/domain/bridge/semanticRuntimeAdapter");
+    const [job] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, jobId)).limit(1);
+    if (job) {
+      const semCtx = await ensureSemanticObject(db, jobId, job.jobType);
+      await recordEvidence(db, semCtx, savedMsg.id, params.message, "system", params.channelId);
+    }
+  } catch (err) {
+    console.warn("send_to_channel: evidence recording failed (legacy job?)", err);
+  }
+
+  return {
+    success: true,
+    channelId: params.channelId,
+    messageId: savedMsg.id,
+    jobId,
+  };
+}

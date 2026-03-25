@@ -19,6 +19,7 @@ import {
   generateFormalQuote,
   listChannels,
   viewChannel,
+  sendToChannel,
 } from "./adminChatTools";
 
 const log = createLogger("admin-chat");
@@ -40,6 +41,9 @@ WHAT YOU CAN DO:
 - Change job status (schedule, mark complete, etc.)
 - Generate formal quotes
 - Show a summary of active/upcoming work
+- View and manage conversation channels (each participant has their own scoped channel)
+- Send messages to specific channels (e.g., message the tenant directly via send_to_channel)
+- When showing job detail, mention how many channels exist and who's involved
 - SEE PHOTOS: When Todd sends photos, you can see them. Use this to:
   - Read receipts (Bunnings, hardware stores) — extract items, prices, quantities
   - Identify products (door handles, taps, tiles, timber) from photos or screenshots
@@ -209,6 +213,18 @@ const TOOLS: Anthropic.Tool[] = [
       required: ["channelId"],
     },
   },
+  {
+    name: "send_to_channel",
+    description: "Send a message to a specific participant's channel. The customer will see it when they open their conversation. Also records the message as evidence in the kernel audit trail.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        channelId: { type: "string", description: "The channel UUID to send the message to" },
+        message: { type: "string", description: "The message to send to the participant" },
+      },
+      required: ["channelId", "message"],
+    },
+  },
 ];
 
 // ─────────────────────────────────────────────
@@ -237,6 +253,8 @@ async function executeTool(name: string, input: any): Promise<any> {
       return listChannels(input);
     case "view_channel":
       return viewChannel(input);
+    case "send_to_channel":
+      return sendToChannel(input);
     default:
       return { error: `Unknown tool: ${name}` };
   }
