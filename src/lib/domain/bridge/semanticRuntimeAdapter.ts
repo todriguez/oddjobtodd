@@ -84,9 +84,10 @@ export async function recordEvidence(
   messageId: string,
   content: string,
   senderType: "customer" | "ai" | "system",
+  channelId?: string,
 ): Promise<void> {
   const adapter = getAdapter(db);
-  return adapter.recordTradesEvidence(ctx, messageId, content, senderType);
+  return adapter.recordTradesEvidence(ctx, messageId, content, senderType, channelId);
 }
 
 export async function recordInstrument(

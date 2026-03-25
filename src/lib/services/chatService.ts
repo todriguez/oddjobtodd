@@ -151,7 +151,7 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
   }
 
   // ── Semantic layer: record customer message as evidence ──
-  recordEvidence(db, semCtx, savedMsg.id, input.message, "customer");
+  recordEvidence(db, semCtx, savedMsg.id, input.message, "customer", input.channelId);
 
   let currentState = loadJobState(job);
 
@@ -291,7 +291,7 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
     mergedState.estimatePresented = true;
   }
 
-  // 10. Build chat messages (with PDF context if applicable)
+  // 10. Build chat messages (with PDF context + channel policy context if applicable)
   const pdfImportContext = job.leadSource === "agent_pdf" && mergedState.importedTasks?.length
     ? {
         address: mergedState.address || mergedState.suburb || "the property",
@@ -300,7 +300,49 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
         gaps: mergedState.missingInfo || [],
       }
     : undefined;
-  const systemPrompt = buildSystemPrompt({ pdfImportContext });
+
+  // Resolve channel policy for this participant (if channel exists)
+  let channelContext: {
+    participantRole: string;
+    systemPromptAdditions?: string[];
+    toneOverrides?: { formality?: string; role?: string };
+    hiddenTopics?: string[];
+  } | undefined = undefined;
+  if (input.channelId && custId) {
+    try {
+      const { findParticipant } = await import("@/lib/semantos-kernel/channelService");
+      const { evaluateChannelPolicy, filterStateForAi } = await import("@/lib/semantos-kernel/policyEvaluator");
+      const identityRef = `customer:${custId}`;
+      const participant = await findParticipant(semCtx.semanticObjectId, identityRef);
+      if (participant) {
+        const policyEval = await evaluateChannelPolicy(input.channelId, participant.id, participant.participantRole);
+        if (policyEval) {
+          // Determine hidden topics from field visibility
+          const hiddenTopics: string[] = [];
+          const roleRule = policyEval.roleRule;
+          for (const [field, vis] of Object.entries(roleRule.fieldVisibility)) {
+            if (vis === "hidden") {
+              if (field.includes("estimate") || field.includes("rom") || field.includes("cost")) {
+                hiddenTopics.push("pricing");
+                hiddenTopics.push("estimates");
+              }
+            }
+          }
+
+          channelContext = {
+            participantRole: participant.participantRole,
+            systemPromptAdditions: policyEval.aiContext.systemPromptAdditions,
+            toneOverrides: policyEval.aiContext.toneOverrides,
+            hiddenTopics: [...new Set(hiddenTopics)],
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("chat.policy.evaluation_failed", err);
+    }
+  }
+
+  const systemPrompt = buildSystemPrompt({ pdfImportContext, channelContext });
   const chatMessages: Anthropic.MessageParam[] = buildChatMessages(
     recentMessages,
     systemInjection
@@ -330,7 +372,7 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
   }).returning();
 
   // ── Semantic layer: record AI reply as evidence ──
-  recordEvidence(db, semCtx, savedReply.id, reply, "ai");
+  recordEvidence(db, semCtx, savedReply.id, reply, "ai", input.channelId);
 
   // 13. Update job record with all scores
   const jobUpdates: Record<string, unknown> = {

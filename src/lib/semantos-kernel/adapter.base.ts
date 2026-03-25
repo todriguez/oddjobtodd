@@ -267,21 +267,24 @@ export class SemanticAdapter {
    * @param content text content or reference
    * @param sourceRef message UUID, filename, channel
    * @param confidence confidence level 0.0-1.0
+   * @param channelId optional channel attribution
    */
   async recordEvidence(
     ctx: SemanticContext,
     evidenceKind: string,
     content: string,
     sourceRef: string,
-    confidence: number = 0.5
+    confidence: number = 0.5,
+    channelId?: string
   ): Promise<void> {
-    await this._safeWrite("recordEvidence", ctx.semanticObjectId, { ctx, evidenceKind, content, sourceRef, confidence }, async () => {
+    await this._safeWrite("recordEvidence", ctx.semanticObjectId, { ctx, evidenceKind, content, sourceRef, confidence, channelId }, async () => {
       await this.db.insert(evidenceItems).values({
         objectId: ctx.semanticObjectId,
         evidenceKind,
         content,
         sourceRef,
         confidence,
+        ...(channelId ? { channelId } : {}),
       });
     });
   }
@@ -511,7 +514,7 @@ export class SemanticAdapter {
         await this.recordScore(payload.ctx, payload.scoreKind, payload.scorePayload);
         break;
       case "recordEvidence":
-        await this.recordEvidence(payload.ctx, payload.evidenceKind, payload.content, payload.sourceRef, payload.confidence);
+        await this.recordEvidence(payload.ctx, payload.evidenceKind, payload.content, payload.sourceRef, payload.confidence, payload.channelId);
         break;
       case "recordInstrument":
         await this.recordInstrument(payload.ctx, payload.instrumentType, payload.instrumentPath, payload.payload, payload.linearity);

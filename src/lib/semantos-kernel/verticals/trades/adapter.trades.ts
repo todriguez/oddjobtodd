@@ -219,14 +219,16 @@ export class TradesSemanticAdapter extends SemanticAdapter {
     ctx: SemanticContext,
     messageId: string,
     content: string,
-    senderType: string
+    senderType: string,
+    channelId?: string
   ): Promise<void> {
     await this.recordEvidence(
       ctx,
       "message",
       content,
       messageId,
-      0.9 // default confidence for message evidence
+      0.9, // default confidence for message evidence
+      channelId
     );
   }
 
