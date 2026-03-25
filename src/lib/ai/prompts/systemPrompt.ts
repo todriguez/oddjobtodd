@@ -14,6 +14,12 @@ export function buildSystemPrompt(context?: {
     agentName?: string;
     gaps: string[];
   };
+  channelContext?: {
+    participantRole: string;
+    systemPromptAdditions?: string[];
+    toneOverrides?: { formality?: string; role?: string };
+    hiddenTopics?: string[]; // topics the AI should not raise (e.g., "estimates", "pricing")
+  };
 }): string {
   const name = context?.operatorName || "Todd";
   const area = context?.serviceArea || "Sunshine Coast (Noosa area, 30-60min radius)";
@@ -110,7 +116,33 @@ IMPORTANT RULES:
 - Every message saves automatically — there is no submit button
 - If the customer drops off, that's ok — the partial record is saved
 - Don't rush to a conclusion — a good conversation produces better job records
-- If someone asks for exact pricing, say: "Hard to be exact without seeing it, but I can give you a rough idea of what these jobs usually run"${context?.pdfImportContext ? buildPdfImportSection(context.pdfImportContext) : ""}`;
+- If someone asks for exact pricing, say: "Hard to be exact without seeing it, but I can give you a rough idea of what these jobs usually run"${context?.pdfImportContext ? buildPdfImportSection(context.pdfImportContext) : ""}${context?.channelContext ? buildChannelContextSection(context.channelContext) : ""}`;
+}
+
+function buildChannelContextSection(ctx: NonNullable<Parameters<typeof buildSystemPrompt>[0]>["channelContext"] & {}): string {
+  let section = "\n\nCHANNEL CONTEXT:";
+  section += `\nYou are speaking with a participant whose role is: ${ctx.participantRole}.`;
+
+  if (ctx.toneOverrides?.formality) {
+    section += `\nTone: ${ctx.toneOverrides.formality}.`;
+  }
+  if (ctx.toneOverrides?.role) {
+    section += ` You are acting as: ${ctx.toneOverrides.role}.`;
+  }
+
+  if (ctx.hiddenTopics && ctx.hiddenTopics.length > 0) {
+    section += `\n\nDO NOT discuss the following topics with this participant: ${ctx.hiddenTopics.join(", ")}.`;
+    section += "\nIf they ask about these topics, redirect them to contact the property manager or landlord.";
+  }
+
+  if (ctx.systemPromptAdditions && ctx.systemPromptAdditions.length > 0) {
+    section += "\n\nADDITIONAL GUIDELINES:";
+    for (const addition of ctx.systemPromptAdditions) {
+      section += `\n- ${addition}`;
+    }
+  }
+
+  return section;
 }
 
 function buildPdfImportSection(ctx: {

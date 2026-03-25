@@ -99,48 +99,62 @@ export class SemanticAdapter {
    * ensureObject: Creates a SemanticObject row if not exists.
    * Returns SemanticContext for further operations.
    *
+   * When externalId is provided, lookup uses (typeHash, externalId) for
+   * per-instance objects (e.g., each job gets its own semantic object).
+   * When omitted, lookup uses typeHash alone for singleton objects
+   * (e.g., type registries, shared policies).
+   *
    * @param objectKind "job" | "customer" | "site" | ...
    * @param typeHash 64-char hex SHA256(vertical:objectKind:subtype)
    * @param typePath human-readable path like "trades.job.carpentry.hire"
    * @param ownerId optional owner/creator ID
+   * @param externalId optional per-instance identifier (e.g., jobId)
    * @returns SemanticContext
    */
   async ensureObject(
     objectKind: string,
     typeHash: string,
     typePath: string,
-    ownerId?: string
+    ownerId?: string,
+    externalId?: string
   ): Promise<SemanticContext> {
-    return this._safeWrite("ensureObject", "", { objectKind, typeHash, typePath, ownerId }, async () => {
-      // Check if exists
+    return this._safeWrite("ensureObject", "", { objectKind, typeHash, typePath, ownerId, externalId }, async () => {
+      // Lookup: composite (typeHash + externalId) for per-instance objects,
+      // typeHash-only for singletons (externalId is null/undefined).
+      const whereClause = externalId
+        ? and(eq(semanticObjects.typeHash, typeHash), eq(semanticObjects.externalId, externalId))
+        : eq(semanticObjects.typeHash, typeHash);
+
       const existing = await this.db
         .select()
         .from(semanticObjects)
-        .where(eq(semanticObjects.typeHash, typeHash))
+        .where(whereClause)
         .limit(1);
 
-      let objectId: string;
       if (existing.length > 0) {
-        objectId = existing[0].id;
-      } else {
-        // Create new
-        const result = await this.db
-          .insert(semanticObjects)
-          .values({
-            vertical: this.verticalConfig.verticalId,
-            objectKind,
-            typeHash,
-            typePath,
-            ownerId,
-            anchorStatus: "none",
-          })
-          .returning({ id: semanticObjects.id });
-
-        objectId = result[0].id;
+        return {
+          semanticObjectId: existing[0].id,
+          version: existing[0].currentVersion,
+          stateHash: existing[0].currentStateHash,
+        };
       }
 
+      // Create new
+      const result = await this.db
+        .insert(semanticObjects)
+        .values({
+          vertical: this.verticalConfig.verticalId,
+          objectKind,
+          typeHash,
+          typePath,
+          externalId: externalId ?? null,
+          ownerId,
+          anchorStatus: "none",
+        })
+        .returning({ id: semanticObjects.id });
+
       return {
-        semanticObjectId: objectId,
+        semanticObjectId: result[0].id,
         version: 1,
         stateHash: "",
       };
@@ -253,21 +267,24 @@ export class SemanticAdapter {
    * @param content text content or reference
    * @param sourceRef message UUID, filename, channel
    * @param confidence confidence level 0.0-1.0
+   * @param channelId optional channel attribution
    */
   async recordEvidence(
     ctx: SemanticContext,
     evidenceKind: string,
     content: string,
     sourceRef: string,
-    confidence: number = 0.5
+    confidence: number = 0.5,
+    channelId?: string
   ): Promise<void> {
-    await this._safeWrite("recordEvidence", ctx.semanticObjectId, { ctx, evidenceKind, content, sourceRef, confidence }, async () => {
+    await this._safeWrite("recordEvidence", ctx.semanticObjectId, { ctx, evidenceKind, content, sourceRef, confidence, channelId }, async () => {
       await this.db.insert(evidenceItems).values({
         objectId: ctx.semanticObjectId,
         evidenceKind,
         content,
         sourceRef,
         confidence,
+        ...(channelId ? { channelId } : {}),
       });
     });
   }
@@ -488,7 +505,7 @@ export class SemanticAdapter {
   private async _executeWrite(writeKind: string, payload: any): Promise<void> {
     switch (writeKind) {
       case "ensureObject":
-        await this.ensureObject(payload.objectKind, payload.typeHash, payload.typePath, payload.ownerId);
+        await this.ensureObject(payload.objectKind, payload.typeHash, payload.typePath, payload.ownerId, payload.externalId);
         break;
       case "recordState":
         await this.recordState(payload.ctx, payload.stateHash, payload.prevStateHash, payload.payload, payload.payloadSize, payload.source);
@@ -497,7 +514,7 @@ export class SemanticAdapter {
         await this.recordScore(payload.ctx, payload.scoreKind, payload.scorePayload);
         break;
       case "recordEvidence":
-        await this.recordEvidence(payload.ctx, payload.evidenceKind, payload.content, payload.sourceRef, payload.confidence);
+        await this.recordEvidence(payload.ctx, payload.evidenceKind, payload.content, payload.sourceRef, payload.confidence, payload.channelId);
         break;
       case "recordInstrument":
         await this.recordInstrument(payload.ctx, payload.instrumentType, payload.instrumentPath, payload.payload, payload.linearity);

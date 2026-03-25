@@ -42,6 +42,12 @@ interface LeadDetail {
   }>;
   metadata: any;
   outcome: any;
+  channels?: Array<{
+    id: string;
+    kind: string;
+    label: string;
+    participants: Array<{ id: string; identityRef?: string; role?: string; displayName?: string }>;
+  }>;
 }
 
 // ── Sub Score Bar ───────────────────────────
@@ -316,7 +322,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
           <h3 className="text-sm font-medium text-gray-700 mb-3">Actions</h3>
 
           <div className="flex flex-wrap gap-2 mb-4">
-            {["followed_up", "quoted", "booked", "site_visited", "declined", "archived"].map((action) => (
+            {["followed_up", "evaluated", "committed", "inspected", "declined", "archived"].map((action) => (
               <button
                 key={action}
                 onClick={() => handleAction(action)}
@@ -338,7 +344,8 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 if (!smsPhone && metadata?.customerPhone) setSmsPhone(metadata.customerPhone);
                 if (!smsMessage) {
                   const addr = metadata?.address || metadata?.suburb || "the property";
-                  const link = `https://oddjobtodd.vercel.app/?jobId=${id}`;
+                  const customerChannel = data?.channels?.find((ch: any) => ch.participants?.some((p: any) => p.identityRef?.startsWith("customer:")));
+                    const link = customerChannel ? `https://oddjobtodd.vercel.app/?jobId=${id}&channelId=${customerChannel.id}` : `https://oddjobtodd.vercel.app/?jobId=${id}`;
                   setSmsMessage(`Hi${metadata?.customerName ? ` ${metadata.customerName}` : ""}, Todd's been asked to look at some work at ${addr}. Could you help with a few details? ${link}`);
                 }
               }}
@@ -356,7 +363,8 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 <button
                   onClick={() => {
                     const addr = metadata?.address || metadata?.suburb || "the property";
-                    const link = `https://oddjobtodd.vercel.app/?jobId=${id}`;
+                    const customerChannel = data?.channels?.find((ch: any) => ch.participants?.some((p: any) => p.identityRef?.startsWith("customer:")));
+                    const link = customerChannel ? `https://oddjobtodd.vercel.app/?jobId=${id}&channelId=${customerChannel.id}` : `https://oddjobtodd.vercel.app/?jobId=${id}`;
                     setSmsMessage(`Hi${metadata?.customerName ? ` ${metadata.customerName}` : ""}, Todd's been asked to look at some work at ${addr}. Could you help with a few details? ${link}`);
                   }}
                   className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200"
@@ -366,7 +374,8 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 <button
                   onClick={() => {
                     const addr = metadata?.address || metadata?.suburb || "the property";
-                    const link = `https://oddjobtodd.vercel.app/?jobId=${id}`;
+                    const customerChannel = data?.channels?.find((ch: any) => ch.participants?.some((p: any) => p.identityRef?.startsWith("customer:")));
+                    const link = customerChannel ? `https://oddjobtodd.vercel.app/?jobId=${id}&channelId=${customerChannel.id}` : `https://oddjobtodd.vercel.app/?jobId=${id}`;
                     setSmsMessage(`Hi${metadata?.customerName ? ` ${metadata.customerName}` : ""}, Todd needs to come by ${addr} to take a look before quoting. When suits you? ${link}`);
                   }}
                   className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200"
