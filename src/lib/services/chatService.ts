@@ -603,3 +603,70 @@ function mapPhaseToStatus(
       return null;
   }
 }
+
+// ─────────────────────────────────────────────
+// OJT-P4: handleTenantMessage — HTTP-edge wrapper
+//
+// Thin adapter on top of processCustomerMessage that takes the
+// phone-derived identity carried in by /api/v3/chat and turns it into
+// the {jobId, customerId, message} contract the existing pipeline
+// expects. P4 does not rewire the pipeline — P5 will replace the
+// internals with handleMessage. Kept minimal on purpose.
+// ─────────────────────────────────────────────
+
+export interface HandleTenantMessageInput {
+  identity: { facetId: string; certId: string };
+  message: string;
+  jobId?: string;
+}
+
+export interface HandleTenantMessageResult {
+  reply: string;
+  jobId: string;
+}
+
+export async function handleTenantMessage(
+  input: HandleTenantMessageInput,
+): Promise<HandleTenantMessageResult> {
+  const db = await getDb();
+
+  // Resolve-or-create a job for this tenant. P5 will rework this to
+  // run the handoff through the semantic-object bridge; P4 just needs
+  // a jobId so processCustomerMessage can run.
+  let jobId = input.jobId;
+  if (!jobId) {
+    // Look for the default organisation (seeded in dev). If none
+    // exists yet, create a minimal placeholder so the pipeline can
+    // still run for /api/v3/chat tests.
+    const [org] = await db.select().from(schema.organisations).limit(1);
+    let organisationId: string;
+    if (org) {
+      organisationId = org.id;
+    } else {
+      const [created] = await db
+        .insert(schema.organisations)
+        .values({ name: "OJT" })
+        .returning();
+      organisationId = created.id;
+    }
+
+    const [newJob] = await db
+      .insert(schema.jobs)
+      .values({
+        organisationId,
+        leadSource: "website_chat",
+        status: "new_lead",
+      })
+      .returning();
+    jobId = newJob.id;
+  }
+
+  const result = await processCustomerMessage({
+    jobId,
+    customerId: undefined,
+    message: input.message,
+  });
+
+  return { reply: result.reply, jobId: result.jobId };
+}
+
