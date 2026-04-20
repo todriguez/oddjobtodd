@@ -661,9 +661,13 @@ export async function handleTenantMessage(
     jobId = newJob.id;
   }
 
+  // NB: processCustomerMessage's ChatInput requires customerId; P4
+  // skips customer resolution (P5 will handle the identity-→-customer
+  // mapping via the semantic-object bridge). Pass an empty string;
+  // downstream code tolerates it via `input.customerId || null`.
   const result = await processCustomerMessage({
     jobId,
-    customerId: undefined,
+    customerId: "",
     message: input.message,
   });
 

@@ -38,12 +38,12 @@ export interface ObjectPatchPayload {
   newStateHash: string;
   patchKind:
     | "extraction"
-    | "user_edit"
-    | "system_rule"
-    | "score_update"
-    | "status_change"
-    | "entity_link"
-    | "provenance";
+    | "rescore"
+    | "manual_override"
+    | "state_transition"
+    | "evidence_merge"
+    | "instrument_emit"
+    | "action";
   delta: unknown;
   deltaCount?: number;
   source: string;
