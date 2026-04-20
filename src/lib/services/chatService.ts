@@ -276,9 +276,15 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
       }
     : undefined;
   const systemPrompt = buildSystemPrompt({ pdfImportContext });
+
+  // ── Build confirmed-facts context from accumulated state ──
+  // This prevents the model from re-asking questions already answered.
+  const confirmedFacts = buildConfirmedFacts(mergedState);
+
   const chatMessages: Anthropic.MessageParam[] = buildChatMessages(
     recentMessages,
-    systemInjection
+    systemInjection,
+    confirmedFacts,
   );
 
   // 11. Call chat LLM
@@ -470,9 +476,17 @@ function loadJobState(job: typeof schema.jobs.$inferSelect): AccumulatedJobState
 
 function buildChatMessages(
   dbMessages: (typeof schema.messages.$inferSelect)[],
-  systemInjection: string | null
+  systemInjection: string | null,
+  confirmedFacts: string | null = null,
 ): Anthropic.MessageParam[] {
   const messages: Anthropic.MessageParam[] = [];
+
+  // Inject confirmed facts as the first "system context" message
+  // so the model always knows what's been established before reading history.
+  if (confirmedFacts) {
+    messages.push({ role: "user", content: confirmedFacts });
+    messages.push({ role: "assistant", content: "Got it — I have the current state. Continuing the conversation." });
+  }
 
   const sorted = [...dbMessages].reverse();
   for (const msg of sorted) {
@@ -486,6 +500,73 @@ function buildChatMessages(
   }
 
   return normaliseMessageOrder(messages);
+}
+
+/**
+ * Build a confirmed-facts summary from the accumulated state.
+ * This is injected at the start of the conversation so the chat model
+ * KNOWS what's been answered and what's still missing — without having
+ * to re-derive it from raw conversation history.
+ *
+ * This solves the "asks the same question 5 times" problem.
+ */
+function buildConfirmedFacts(state: AccumulatedJobState): string | null {
+  const confirmed: string[] = [];
+  const missing: string[] = [];
+
+  // Job scope
+  if (state.jobType) confirmed.push(`Job type: ${state.jobType}`);
+  if (state.jobSubcategory) confirmed.push(`Subcategory: ${state.jobSubcategory}`);
+  if (state.repairReplaceSignal && state.repairReplaceSignal !== "unclear") {
+    confirmed.push(`Type of work: ${state.repairReplaceSignal}`);
+  }
+  if (state.scopeDescription) confirmed.push(`Scope: ${state.scopeDescription}`);
+  if (state.quantity) confirmed.push(`Quantity: ${state.quantity}`);
+  if (state.materials) confirmed.push(`Materials: ${state.materials}`);
+  if (state.materialCondition) confirmed.push(`Material condition: ${state.materialCondition}`);
+  if (state.accessDifficulty) confirmed.push(`Access: ${state.accessDifficulty}`);
+
+  // Location
+  if (state.suburb) confirmed.push(`Suburb: ${state.suburb}`);
+  if (state.address) confirmed.push(`Address: ${state.address}`);
+  if (state.accessNotes) confirmed.push(`Access notes: ${state.accessNotes}`);
+
+  // Urgency
+  if (state.urgency && state.urgency !== "unspecified") confirmed.push(`Urgency: ${state.urgency}`);
+
+  // Contact
+  if (state.customerName) confirmed.push(`Name: ${state.customerName}`);
+  if (state.customerPhone) confirmed.push(`Phone: ${state.customerPhone}`);
+  if (state.customerEmail) confirmed.push(`Email: ${state.customerEmail}`);
+
+  // Photos
+  if (state.photosReferenced) confirmed.push(`Photos: customer has sent/referenced photos`);
+
+  // Estimate status
+  if (state.estimatePresented) confirmed.push(`ROM estimate: already presented`);
+  if (state.estimateAcknowledged) confirmed.push(`Estimate reaction: ${state.estimateAckStatus}`);
+
+  // Missing info from extraction
+  if (state.missingInfo && state.missingInfo.length > 0) {
+    for (const gap of state.missingInfo) {
+      missing.push(gap);
+    }
+  }
+
+  // Only inject if there's at least something confirmed
+  if (confirmed.length === 0) return null;
+
+  let result = `[SYSTEM CONTEXT — Current job state. DO NOT re-ask anything listed under CONFIRMED. Only ask about STILL NEEDED items, one at a time.]\n\nCONFIRMED (already answered — do NOT ask again):\n`;
+  result += confirmed.map(f => `• ${f}`).join("\n");
+
+  if (missing.length > 0) {
+    result += `\n\nSTILL NEEDED (ask about these, one at a time):\n`;
+    result += missing.map(f => `• ${f}`).join("\n");
+  }
+
+  result += `\n\nPhase: ${state.conversationPhase} | Completeness: ${state.completenessScore}%`;
+
+  return result;
 }
 
 function normaliseMessageOrder(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] {

@@ -61,11 +61,12 @@ class TwilioSmsService implements SmsService {
 class MockSmsService implements SmsService {
   async sendMessage(to: string, body: string): Promise<{ success: boolean; messageSid?: string }> {
     const normalized = normalizePhone(to);
-    log.info(
-      { to: maskPhone(normalized), bodyLength: body.length, body },
-      "sms.mock.send — message logged to console"
+    log.warn(
+      { to: maskPhone(normalized), bodyLength: body.length },
+      "sms.mock.send — TWILIO_FROM_NUMBER not set, SMS NOT actually sent. Set TWILIO_FROM_NUMBER to enable real SMS."
     );
-    return { success: true, messageSid: "MOCK_SID" };
+    // Return failure so the admin UI doesn't show a false "sent" confirmation
+    return { success: false };
   }
 }
 

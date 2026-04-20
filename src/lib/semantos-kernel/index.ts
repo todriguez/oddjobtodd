@@ -23,3 +23,4 @@ export * from "../domain/bridge/typeHashRegistry";
 
 // Verticals
 export * as trades from "./verticals/trades";
+export * as risk from "./verticals/risk";

@@ -34,13 +34,23 @@ export const POST = withAdminAuth(async (request: NextRequest) => {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
+    // Check if real SMS is configured
+    const { hasTwilioSms } = await import("@/lib/config");
+    if (!hasTwilioSms()) {
+      log.warn({ jobId }, "sms.not_configured — TWILIO_FROM_NUMBER not set");
+      return NextResponse.json(
+        { error: "SMS not configured. Set TWILIO_FROM_NUMBER in environment variables to enable outbound SMS." },
+        { status: 503 }
+      );
+    }
+
     // Send the SMS
     const sms = getSmsService();
     const normalized = normalizePhone(phone);
     const result = await sms.sendMessage(normalized, smsBody);
 
     if (!result.success) {
-      return NextResponse.json({ error: "SMS delivery failed" }, { status: 502 });
+      return NextResponse.json({ error: "SMS delivery failed — check Twilio logs" }, { status: 502 });
     }
 
     // Record the outbound SMS as a system message on the job
