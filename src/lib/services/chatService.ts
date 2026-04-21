@@ -603,3 +603,92 @@ function mapPhaseToStatus(
       return null;
   }
 }
+
+// ─────────────────────────────────────────────
+// OJT-P4: handleTenantMessage — HTTP-edge wrapper
+//
+// Thin adapter on top of processCustomerMessage that takes the
+// phone-derived identity carried in by /api/v3/chat and turns it into
+// the {jobId, customerId, message} contract the existing pipeline
+// expects. P4 does not rewire the pipeline — P5 will replace the
+// internals with handleMessage. Kept minimal on purpose.
+// ─────────────────────────────────────────────
+
+export interface HandleTenantMessageInput {
+  identity: { facetId: string; certId: string };
+  message: string;
+  jobId?: string;
+}
+
+export interface HandleTenantMessageResult {
+  reply: string;
+  jobId: string;
+}
+
+// Test-only override hook. When set (via __setHandleTenantMessageForTests)
+// /api/v3/chat runs this instead of the real pipeline. Production code
+// must never touch it; the real implementation is exported unchanged.
+let _handleTenantMessageOverride:
+  | ((input: HandleTenantMessageInput) => Promise<HandleTenantMessageResult>)
+  | null = null;
+
+export function __setHandleTenantMessageForTests(
+  fn:
+    | ((input: HandleTenantMessageInput) => Promise<HandleTenantMessageResult>)
+    | null,
+): void {
+  _handleTenantMessageOverride = fn;
+}
+
+export async function handleTenantMessage(
+  input: HandleTenantMessageInput,
+): Promise<HandleTenantMessageResult> {
+  if (_handleTenantMessageOverride) {
+    return _handleTenantMessageOverride(input);
+  }
+  const db = await getDb();
+
+  // Resolve-or-create a job for this tenant. P5 will rework this to
+  // run the handoff through the semantic-object bridge; P4 just needs
+  // a jobId so processCustomerMessage can run.
+  let jobId = input.jobId;
+  if (!jobId) {
+    // Look for the default organisation (seeded in dev). If none
+    // exists yet, create a minimal placeholder so the pipeline can
+    // still run for /api/v3/chat tests.
+    const [org] = await db.select().from(schema.organisations).limit(1);
+    let organisationId: string;
+    if (org) {
+      organisationId = org.id;
+    } else {
+      const [created] = await db
+        .insert(schema.organisations)
+        .values({ name: "OJT" })
+        .returning();
+      organisationId = created.id;
+    }
+
+    const [newJob] = await db
+      .insert(schema.jobs)
+      .values({
+        organisationId,
+        leadSource: "website_chat",
+        status: "new_lead",
+      })
+      .returning();
+    jobId = newJob.id;
+  }
+
+  // NB: processCustomerMessage's ChatInput requires customerId; P4
+  // skips customer resolution (P5 will handle the identity-→-customer
+  // mapping via the semantic-object bridge). Pass an empty string;
+  // downstream code tolerates it via `input.customerId || null`.
+  const result = await processCustomerMessage({
+    jobId,
+    customerId: "",
+    message: input.message,
+  });
+
+  return { reply: result.reply, jobId: result.jobId };
+}
+
