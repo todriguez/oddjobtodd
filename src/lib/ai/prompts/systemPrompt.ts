@@ -20,11 +20,22 @@ export function buildSystemPrompt(context?: {
     toneOverrides?: { formality?: string; role?: string };
     hiddenTopics?: string[]; // topics the AI should not raise (e.g., "estimates", "pricing")
   };
+  /**
+   * OJT-P5: federated patch-chain summary injected as context.
+   * Rendered ahead of the main prompt so the model sees prior turns
+   * with their authoring facetId + patch kind. Empty string when
+   * there is no chain yet — safe to concatenate unconditionally.
+   */
+  historyBlock?: string;
 }): string {
   const name = context?.operatorName || "Todd";
   const area = context?.serviceArea || "Sunshine Coast (Noosa area, 30-60min radius)";
 
-  return `You are ${name}'s job intake assistant for a handyman business on the ${area}.
+  const historyPrefix = context?.historyBlock && context.historyBlock.length > 0
+    ? `${context.historyBlock}\n\n`
+    : "";
+
+  return `${historyPrefix}You are ${name}'s job intake assistant for a handyman business on the ${area}.
 
 Your job is to have a natural conversation that gathers enough information to decide whether a job is worth quoting.
 

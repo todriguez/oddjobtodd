@@ -41,14 +41,25 @@ import {
 
 import type { OjtIdentity } from "../identity";
 
+/**
+ * Identity shape accepted by runHandleMessage. Intentionally narrower
+ * than `OjtIdentity` — we only need the two fields that flow into the
+ * HatContext. Both the phone-derived `OjtIdentity` and the
+ * test-friendly `{facetId, certId}` shape that `/api/v3/chat` hands
+ * to `handleTenantMessage` satisfy this.
+ */
+export type HandleMessageIdentity =
+  | OjtIdentity
+  | { facetId: string; certId: string };
+
 /** OJT's public triage hint — the string chatService switches on. */
 export type OjtTriageHint = "PROPOSES" | "RATIFIES" | "NO_INTENT";
 
 export interface OjtHandleMessageInput {
   /** The semantic object this turn belongs to (e.g. `job:<uuid>`). */
   objectId: string;
-  /** The authoring identity — phone-derived or admin. */
-  identity: OjtIdentity;
+  /** The authoring identity — phone-derived, admin, or a narrow stub. */
+  identity: HandleMessageIdentity;
   /** The message body. */
   message: string;
   /** Optional correlationId to thread through the turn. */
@@ -136,7 +147,7 @@ function randomId(): string {
  * capabilities or domainFlag — the pipeline stubs don't care. Once
  * the cell-engine side lands these will carry real values.
  */
-function buildOjtHat(identity: OjtIdentity): HatContext {
+function buildOjtHat(identity: HandleMessageIdentity): HatContext {
   return {
     hatId: `ojt-hat:${identity.facetId}`,
     facetId: identity.facetId,
