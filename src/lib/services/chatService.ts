@@ -51,6 +51,9 @@ import {
   recordStatusTransition,
   type SemanticJobContext,
 } from "../domain/bridge/semanticRuntimeAdapter";
+import { objectPatches } from "../semantos-kernel/schema.core";
+import { formatHistoryBlock, listRecentPatches } from "./patchChain";
+import { runHandleMessage } from "./ojtHandleMessage";
 
 // ── Types ────────────────────────────────────
 
@@ -61,6 +64,13 @@ export interface ChatInput {
   messageType?: "text" | "voice" | "image";
   photos?: string[]; // Vercel Blob URLs
   channelId?: string; // Conversation channel for multi-participant scoping
+  /**
+   * OJT-P5: optional federated history block to inject ahead of the
+   * system prompt. Produced by `formatHistoryBlock(listRecentPatches())`.
+   * Undefined when called from legacy entry points — the prompt then
+   * falls back to its original layout.
+   */
+  historyBlock?: string;
 }
 
 export interface ChatResult {
@@ -342,7 +352,11 @@ export async function processCustomerMessage(input: ChatInput): Promise<ChatResu
     }
   }
 
-  const systemPrompt = buildSystemPrompt({ pdfImportContext, channelContext });
+  const systemPrompt = buildSystemPrompt({
+    pdfImportContext,
+    channelContext,
+    historyBlock: input.historyBlock,
+  });
   const chatMessages: Anthropic.MessageParam[] = buildChatMessages(
     recentMessages,
     systemInjection
@@ -648,14 +662,13 @@ export async function handleTenantMessage(
   }
   const db = await getDb();
 
-  // Resolve-or-create a job for this tenant. P5 will rework this to
-  // run the handoff through the semantic-object bridge; P4 just needs
-  // a jobId so processCustomerMessage can run.
+  // ── Resolve-or-create a job ────────────────────────────────────
+  //
+  // We still need a legacy `jobs` row so processCustomerMessage runs,
+  // but we also need the `sem_objects` row (the semantic-object id)
+  // because that's the objectId every federation patch references.
   let jobId = input.jobId;
   if (!jobId) {
-    // Look for the default organisation (seeded in dev). If none
-    // exists yet, create a minimal placeholder so the pipeline can
-    // still run for /api/v3/chat tests.
     const [org] = await db.select().from(schema.organisations).limit(1);
     let organisationId: string;
     if (org) {
@@ -679,16 +692,140 @@ export async function handleTenantMessage(
     jobId = newJob.id;
   }
 
-  // NB: processCustomerMessage's ChatInput requires customerId; P4
-  // skips customer resolution (P5 will handle the identity-→-customer
-  // mapping via the semantic-object bridge). Pass an empty string;
-  // downstream code tolerates it via `input.customerId || null`.
+  // Materialise the semantic object so we have a stable objectId for
+  // the patch chain + handleMessage's conversation patch.
+  const [jobRow] = await db
+    .select()
+    .from(schema.jobs)
+    .where(eq(schema.jobs.id, jobId));
+  if (!jobRow) {
+    throw new Error(`handleTenantMessage: job not found: ${jobId}`);
+  }
+  const semCtx = await ensureSemanticObject(db, jobId, jobRow.jobType ?? null);
+  const semObjectId = semCtx.semanticObjectId;
+
+  // ── 1. Load patch chain for LLM context ───────────────────────
+  const n = readPatchChainLimit();
+  const chain = await listRecentPatches(semObjectId, n);
+  const historyBlock = formatHistoryBlock(chain);
+
+  // ── 2. Run handleMessage to get triage hint ───────────────────
+  const triage = await runHandleMessage({
+    objectId: semObjectId,
+    identity: input.identity,
+    message: input.message,
+  });
+
+  // ── 3. NO_INTENT short-circuit — no LLM, no patches ───────────
+  if (triage.triageHint === "NO_INTENT") {
+    return {
+      reply: "Got nothing to work with there — can you give me a bit more detail?",
+      jobId,
+    };
+  }
+
+  // ── 4. Run existing LLM pipeline (extraction + scoring + chat) ─
   const result = await processCustomerMessage({
     jobId,
     customerId: "",
     message: input.message,
+    historyBlock,
+  });
+
+  // ── 5. Persist a turn patch carrying federation columns ───────
+  //    Each OJT tool-call outcome would ideally be its own row; P5
+  //    emits one summary patch per turn (extraction + scores + reply)
+  //    with timestamp + facetId. P6 will split into per-tool patches
+  //    once the tool-use loop is hoisted above processCustomerMessage.
+  await persistTurnPatch({
+    objectId: semObjectId,
+    identity: input.identity,
+    delta: {
+      triage: triage.triageHint,
+      correlationId: triage.correlationId,
+      conversationPatchId: triage.conversationPatchId,
+      extraction: {
+        jobType: result.extraction.jobType ?? null,
+        conversationPhase: result.conversationPhase,
+      },
+      scores: {
+        customerFitScore: result.customerFitScore,
+        quoteWorthinessScore: result.quoteWorthinessScore,
+        completenessScore: result.completenessScore,
+      },
+      reply: result.reply.slice(0, 400),
+    },
+    source: `handleMessage:${triage.correlationId}`,
   });
 
   return { reply: result.reply, jobId: result.jobId };
 }
+
+// ─────────────────────────────────────────────
+// OJT-P5 helpers — patch-chain fetch + federation-tagged writes
+// ─────────────────────────────────────────────
+
+function readPatchChainLimit(): number {
+  const raw = process.env.OJT_PATCH_CHAIN_N;
+  if (!raw) return 10;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 10;
+}
+
+interface PersistTurnPatchInput {
+  objectId: string;
+  identity: { facetId: string; certId: string };
+  delta: Record<string, unknown>;
+  source: string;
+}
+
+/**
+ * Write a single `sem_object_patches` row tagged with the OJT-P1
+ * federation columns (`timestamp`, `facetId`). Uses `patchKind:
+ * action` — the enum's catch-all for "the LLM ran a turn and
+ * something changed". `lexicon` is deliberately null in P5; P6
+ * stamps it with 'jural' / 'property-management'.
+ *
+ * Reads the current semantic-object row to populate the version
+ * chain fields (fromVersion, toVersion, prevStateHash, newStateHash)
+ * — the patch records "a turn occurred on this state" without
+ * mutating the version itself, matching the BRAP pattern where the
+ * conversation patch is a sibling of the real state transition.
+ */
+async function persistTurnPatch(input: PersistTurnPatchInput): Promise<void> {
+  const db = await getDb();
+  try {
+    const [obj] = await db
+      .select()
+      .from(semanticObjectsTable)
+      .where(eq(semanticObjectsTable.id, input.objectId))
+      .limit(1);
+    const v = obj?.currentVersion ?? 0;
+    const h = obj?.currentStateHash ?? "";
+    await db.insert(objectPatches).values({
+      objectId: input.objectId,
+      fromVersion: v,
+      toVersion: v,
+      prevStateHash: h,
+      newStateHash: h,
+      patchKind: "action",
+      delta: input.delta,
+      deltaCount: Object.keys(input.delta).length,
+      source: input.source,
+      consumed: true,
+      // ── OJT-P1 federation columns ──
+      timestamp: Date.now(),
+      facetId: input.identity.facetId,
+      // lexicon + facetCapabilities stay null — P6 wires them.
+    });
+  } catch (err) {
+    // Never let patch persistence break the HTTP turn. Log and carry.
+    console.warn("chat.p5.persistTurnPatch.failed", err);
+  }
+}
+
+// Re-import the semanticObjects table without colliding with
+// recordStateSnapshot's internal reference. Aliased at the bottom to
+// keep the import block at the top stable for diff readability.
+import { semanticObjects as semanticObjectsTable } from "../semantos-kernel/schema.core";
 
