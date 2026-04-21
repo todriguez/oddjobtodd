@@ -168,6 +168,13 @@ function mapTriageHint(result: HandleMessageResult): OjtTriageHint {
       return "PROPOSES";
     case "ratified":
       return "RATIFIES";
+    // A5: when the calendar guard rejects a proposed slot, surface to
+    // chatService as PROPOSES so the conflict-handling branch in
+    // handleTenantMessage (which inspects `triage.raw.kind`) can render
+    // the user-visible conflict message. The legacy chatService path is
+    // bypassed by an early return upstream.
+    case "reject_conflict":
+      return "PROPOSES";
   }
 }
 
