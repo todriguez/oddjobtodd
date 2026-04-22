@@ -243,6 +243,10 @@ function mapTriageHint(result: HandleMessageResult): OjtTriageHint {
       return "RATIFIES";
     case "reject_conflict":
       return "REJECT_CONFLICT";
+    default: {
+      const _exhaustive: never = result;
+      throw new Error(`mapTriageHint: unexpected HandleMessageResult kind: ${JSON.stringify(_exhaustive)}`);
+    }
   }
 }
 
